@@ -8,7 +8,11 @@ from xml.sax.saxutils import escape
 
 import httpx
 
-from app.infrastructure.gbp.xml_parser import decode_gbp_response, extract_result_text, parse_dataset_tables
+from app.infrastructure.gbp.xml_parser import (
+    decode_gbp_response,
+    extract_result_text,
+    parse_dataset_tables,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +30,12 @@ class GBPCallResult:
 
 
 class GBPClient:
-    """Cliente SOAP para métodos de lectura GBP Módulo 16."""
+    """Cliente SOAP para métodos de lectura GBP Módulo 16.
+
+    Toda respuesta SOAP pasa por:
+    bytes HTTP -> decode_gbp_response -> extract_result_text -> parse_dataset_tables.
+    Esto evita que los textos de GBP lleguen con mojibake al dominio.
+    """
 
     def __init__(
         self,
@@ -53,6 +62,8 @@ class GBPClient:
         lower = token.lower()
         if not token or "invalid username" in lower or "password" in lower:
             raise RuntimeError(f"Falló AuthenticateUser: {token}")
+        if "token expired" in lower:
+            raise RuntimeError("GBP devolvió token expirado al autenticar")
         return token
 
     async def obtener_catalogo_basico(self, token: str) -> list[dict[str, str]]:
@@ -81,41 +92,52 @@ class GBPClient:
     async def call_soap_method(
         self,
         method_name: str,
-        payload: str | None = None,
         *,
         token: str = "",
-        params: dict[str, Any] | None = None,
+        params: dict[str, object] | None = None,
     ) -> GBPCallResult:
-        """Ejecuta llamada SOAP.
+        """Ejecuta método SOAP y devuelve el contenido del nodo *Result.
 
-        Se mantiene el argumento payload para compatibilidad con código existente,
-        pero los métodos productivos usan params para armar el envelope.
+        No usar response.text directamente: puede llegar decodificado con charset
+        incorrecto. Se usa response.content y luego decode_gbp_response().
         """
 
-        started = time.perf_counter()
-        envelope = payload or self._build_soap_envelope(
+        envelope = self._build_soap_envelope(
             token=token,
             method_name=method_name,
             params=params or {},
         )
+
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
-            "SOAPAction": f'"{SOAP_ACTION_PREFIX}/{method_name}"',
+            "SOAPAction": f"{SOAP_ACTION_PREFIX}/{method_name}",
         }
+
+        start = time.perf_counter()
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.post(
                 self.base_url,
                 content=envelope.encode("utf-8"),
                 headers=headers,
             )
-            response.raise_for_status()
+        duration_ms = int((time.perf_counter() - start) * 1000)
 
-        duration_ms = int((time.perf_counter() - started) * 1000)
-        logger.info("gbp_call_ok", extra={"method": method_name, "duration_ms": duration_ms})
-        return GBPCallResult(
-            result_text=extract_result_text(decode_gbp_response(response.content, response.text), method_name),
-            duration_ms=duration_ms,
+        response.raise_for_status()
+
+        soap_text = decode_gbp_response(
+            content=response.content,
+            fallback_text=response.text,
         )
+        result_text = extract_result_text(
+            soap_text=soap_text,
+            method_name=method_name,
+        )
+
+        logger.info(
+            "gbp_soap_call_ok",
+            extra={"method": method_name, "duration_ms": duration_ms},
+        )
+        return GBPCallResult(result_text=result_text, duration_ms=duration_ms)
 
     async def call_rest_method(
         self,

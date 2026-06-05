@@ -7,29 +7,48 @@ from xml.etree import ElementTree as ET
 from app.domain.errors import DatoIncompletoError
 
 
-MOJIBAKE_MARKERS = ("Ã", "Â", "�", "", "")
+# Marcadores típicos de UTF-8 leído como Latin-1/CP1252.
+MOJIBAKE_MARKERS = ("Ã", "Â", "�", "\x91", "\x93", "\x8d", "\x9a")
 
-# Secuencias comunes cuando texto UTF-8 fue interpretado como Latin-1/CP1252
-# antes de llegar al parser XML. Algunas incluyen caracteres C1 que XML 1.0
-# considera inválidos; deben repararse antes de sanear el XML o se pierde
-# información, por ejemplo: MUÃECO -> MUÑECO.
+# Secuencias completas que deben repararse antes de limpiar XML inválido.
+# Algunas contienen caracteres C1 que XML 1.0 no acepta. Si se eliminan antes,
+# se pierde información: MUÃ\x91ECO -> MUÃECO.
 MOJIBAKE_SEQUENCES = {
-    "Ã": "Á",
-    "Ã": "É",
-    "Ã": "Í",
-    "Ã": "Ó",
-    "Ã“": "Ó",
-    "Ã": "Ú",
-    "Ã": "Ñ",
+    "Ã\x81": "Á",
+    "Ã\x89": "É",
+    "Ã\x8d": "Í",
+    "Ã\x93": "Ó",
+    "Ã\x9a": "Ú",
+    "Ã\x91": "Ñ",
+    "ÃÁ": "Á",
+    "ÃÉ": "É",
+    "ÃÍ": "Í",
+    "ÃÓ": "Ó",
+    "ÃÚ": "Ú",
     "Ã‘": "Ñ",
+    "Ã“": "Ó",
     "Ã¡": "á",
     "Ã©": "é",
-    "Ã­": "í",
+    "Ã\xad": "í",
+    "Ãí": "í",
     "Ã³": "ó",
     "Ãº": "ú",
     "Ã±": "ñ",
     "Ã¼": "ü",
     "Â°": "°",
+    "Âº": "º",
+    "Âª": "ª",
+}
+
+# Casos ya dañados por haber perdido un byte/caracter C1 antes de llegar acá.
+# No se usan como regla general de idioma; son patrones reales observados en GBP.
+DAMAGED_SEQUENCES = {
+    "MUÃECO": "MUÑECO",
+    "MuÃeco": "Muñeco",
+    "muÃeco": "muñeco",
+    "categorÃa": "categoría",
+    "CategorÃa": "Categoría",
+    "CATEGORÃA": "CATEGORÍA",
 }
 
 
@@ -38,6 +57,8 @@ def reparar_secuencias_mojibake(value: str) -> str:
 
     fixed = value
     for bad, good in MOJIBAKE_SEQUENCES.items():
+        fixed = fixed.replace(bad, good)
+    for bad, good in DAMAGED_SEQUENCES.items():
         fixed = fixed.replace(bad, good)
     return fixed
 
@@ -49,31 +70,31 @@ def strip_namespace(tag: str) -> str:
 
 
 def reparar_mojibake(value: str | None) -> str | None:
-    """Corrige texto UTF-8 leído erróneamente como Latin-1/Windows-1252.
-
-    GBP puede devolver contenido con acentos o eñes que llega como mojibake
-    después del parseo SOAP/XML. Ejemplos reales: ``DecoraciÃ³n`` y
-    ``GenÃ©rica``. La reparación se aplica solo si aparecen marcadores típicos
-    para no modificar texto correcto.
-    """
+    """Corrige texto UTF-8 leído erróneamente como Latin-1/Windows-1252."""
 
     if value is None:
         return None
     if not isinstance(value, str):
         return value
-    value = reparar_secuencias_mojibake(value)
 
-    if not any(marker in value for marker in MOJIBAKE_MARKERS):
-        return value
+    text = reparar_secuencias_mojibake(value)
 
+    if not any(marker in text for marker in MOJIBAKE_MARKERS):
+        return text
+
+    # Reparación por re-interpretación. Solo se acepta si reduce mojibake.
+    original_marker_count = sum(text.count(marker) for marker in MOJIBAKE_MARKERS)
     for encoding in ("latin1", "cp1252"):
         try:
-            repaired = value.encode(encoding).decode("utf-8")
+            repaired = text.encode(encoding, errors="strict").decode("utf-8", errors="strict")
         except UnicodeError:
             continue
-        if repaired and repaired != value:
+        repaired = reparar_secuencias_mojibake(repaired)
+        repaired_marker_count = sum(repaired.count(marker) for marker in MOJIBAKE_MARKERS)
+        if repaired and repaired != text and repaired_marker_count < original_marker_count:
             return repaired
-    return value
+
+    return text
 
 
 def normalizar_texto_gbp(value: str | None) -> str:
@@ -88,19 +109,16 @@ def normalizar_texto_gbp(value: str | None) -> str:
 def clean_xml_text(text: str) -> str:
     """Sanitiza XML interno devuelto por GBP.
 
-    GBP suele devolver un NewDataSet como texto dentro del SOAP. En catálogos
-    grandes puede incluir caracteres inválidos para XML 1.0 o ampersands sin
-    escapar. Esta función limpia esos casos sin alterar entidades XML válidas.
+    GBP devuelve NewDataSet como texto dentro del SOAP. En catálogos grandes
+    puede traer caracteres inválidos para XML 1.0 o ampersands crudos.
     """
 
     cleaned = (text or "").strip().lstrip("\ufeff")
 
-    if cleaned.startswith("&lt;") or "&lt;NewDataSet" in cleaned[:200]:
+    if cleaned.startswith("&lt;") or "&lt;NewDataSet" in cleaned[:300]:
         cleaned = html.unescape(cleaned)
 
-    # Reparar mojibake antes de remover caracteres inválidos XML. Si se
-    # elimina primero un C1 como \x91, se pierde la Ñ de secuencias como
-    # MUÃ\x91ECO.
+    # Reparar antes de eliminar caracteres inválidos.
     cleaned = reparar_secuencias_mojibake(cleaned)
 
     cleaned = re.sub(r"[^\x09\x0A\x0D\x20-\uD7FF\uE000-\uFFFD]", "", cleaned)
@@ -112,28 +130,36 @@ def clean_xml_text(text: str) -> str:
     return cleaned
 
 
-
 def decode_gbp_response(content: bytes, fallback_text: str | None = None) -> str:
-    """Decodifica respuestas GBP evitando mojibake por charset incorrecto.
-
-    Algunas respuestas llegan como bytes UTF-8 aunque el encabezado o el
-    cliente HTTP puedan interpretarlas como Latin-1/CP1252. Priorizar UTF-8
-    evita que textos como "Decoración" se transformen en "DecoraciÃ³n" antes
-    del parseo.
-    """
+    """Decodifica respuestas GBP evitando charset incorrecto de httpx."""
 
     if not content:
         return fallback_text or ""
 
+    candidates: list[str] = []
     for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin1"):
         try:
             decoded = content.decode(encoding)
         except UnicodeDecodeError:
             continue
         if decoded:
-            return decoded
+            candidates.append(decoded)
 
-    return fallback_text or content.decode("utf-8", errors="replace")
+    if fallback_text:
+        candidates.append(fallback_text)
+
+    if not candidates:
+        return content.decode("utf-8", errors="replace")
+
+    # Elegir la variante con menos marcadores de mojibake tras reparación simple.
+    def score(value: str) -> tuple[int, int]:
+        repaired = reparar_secuencias_mojibake(value)
+        marker_count = sum(repaired.count(marker) for marker in MOJIBAKE_MARKERS)
+        replacement_count = repaired.count("�")
+        return marker_count + replacement_count, len(repaired)
+
+    best = min(candidates, key=score)
+    return reparar_secuencias_mojibake(best)
 
 
 def normalizar_objeto_gbp(value):
@@ -163,7 +189,7 @@ def extract_result_text(soap_text: str, method_name: str) -> str:
     """Extrae el texto del nodo *Result de una respuesta SOAP."""
 
     try:
-        root = ET.fromstring(soap_text)
+        root = ET.fromstring(clean_xml_text(soap_text))
     except ET.ParseError as exc:
         raise DatoIncompletoError(f"GBP devolvió SOAP inválido: {exc}") from exc
 
