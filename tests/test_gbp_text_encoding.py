@@ -81,3 +81,28 @@ def test_normalizar_objeto_gbp_recursivo() -> None:
         "categoria": "Decoración",
         "items": [{"marca": "Genérica"}],
     }
+
+
+def test_normalizar_texto_gbp_corrige_bullet_y_acentos_descripcion_larga() -> None:
+    text = (
+        "SOMOS SILMAR BAZAR ONLINE\n\n"
+        "â¢Realizamos envÃos a todo el pais, podes ver la fecha de entrega estimada\n"
+        "presionando donde dice ver mÃ¡s formas de entrega y colocando tu cÃ³digo postal.\n\n"
+        "â¢Si estas en CABA o GBA, tu pedido llega en el dÃa comprando antes de las 14hs.\n"
+        "â¢Material: CerÃ¡mica con dosificador plÃ¡stico simil metal\n"
+        "â¢Dispenser para jabÃ³n liquido o detergente\n"
+        "â¢LanÃºs Oeste."
+    )
+
+    fixed = normalizar_texto_gbp(text)
+
+    assert "•Realizamos envíos" in fixed
+    assert "más formas" in fixed
+    assert "código postal" in fixed
+    assert "día comprando" in fixed
+    assert "Cerámica" in fixed
+    assert "plástico" in fixed
+    assert "jabón" in fixed
+    assert "Lanús Oeste" in fixed
+    assert "â" not in fixed
+    assert "Ã" not in fixed

@@ -8,12 +8,28 @@ from app.domain.errors import DatoIncompletoError
 
 
 # Marcadores típicos de UTF-8 leído como Latin-1/CP1252.
-MOJIBAKE_MARKERS = ("Ã", "Â", "�", "\x91", "\x93", "\x8d", "\x9a")
+MOJIBAKE_MARKERS = ("Ã", "Â", "â", "€", "�", "\x91", "\x93", "\x8d", "\x9a")
 
 # Secuencias completas que deben repararse antes de limpiar XML inválido.
 # Algunas contienen caracteres C1 que XML 1.0 no acepta. Si se eliminan antes,
 # se pierde información: MUÃ\x91ECO -> MUÃECO.
 MOJIBAKE_SEQUENCES = {
+    # Signos de puntuación y símbolos UTF-8 leídos como Windows-1252.
+    "â€¢": "•",
+    "â¢": "•",
+    "â€“": "–",
+    "â€”": "—",
+    "â€˜": "‘",
+    "â€™": "’",
+    "â€œ": "“",
+    "â€": "”",
+    "â€": "“",
+    "â€": "”",
+    "â€": "“",
+    "â€": "“",
+    "â€": "”",
+    "â€¦": "…",
+    "â€": "”",
     "Ã\x81": "Á",
     "Ã\x89": "É",
     "Ã\x8d": "Í",
@@ -43,6 +59,44 @@ MOJIBAKE_SEQUENCES = {
 # Casos ya dañados por haber perdido un byte/caracter C1 antes de llegar acá.
 # No se usan como regla general de idioma; son patrones reales observados en GBP.
 DAMAGED_SEQUENCES = {
+    # Casos donde el byte C1 de UTF-8 mal decodificado se perdió antes de normalizar.
+    # Ejemplos reales: dÃa -> día, envÃos -> envíos, paÃs -> país.
+    "dÃa": "día",
+    "dÃas": "días",
+    "DÃa": "Día",
+    "DÃas": "Días",
+    "envÃo": "envío",
+    "envÃos": "envíos",
+    "EnvÃo": "Envío",
+    "EnvÃos": "Envíos",
+    "paÃs": "país",
+    "PaÃs": "País",
+    "lÃquido": "líquido",
+    "LÃquido": "Líquido",
+    "frÃo": "frío",
+    "FrÃo": "Frío",
+    "vacÃo": "vacío",
+    "VacÃo": "Vacío",
+    "fÃsico": "físico",
+    "FÃsico": "Físico",
+    "mÃnimo": "mínimo",
+    "MÃnimo": "Mínimo",
+    "mÃ¡ximo": "máximo",
+    "MÃ¡ximo": "Máximo",
+    "mÃ¡s": "más",
+    "MÃ¡s": "Más",
+    "cÃ³digo": "código",
+    "CÃ³digo": "Código",
+    "jabÃ³n": "jabón",
+    "JabÃ³n": "Jabón",
+    "plÃ¡stico": "plástico",
+    "PlÃ¡stico": "Plástico",
+    "cerÃ¡mica": "cerámica",
+    "CerÃ¡mica": "Cerámica",
+    "mÃ¡xima": "máxima",
+    "MÃ¡xima": "Máxima",
+    "LanÃºs": "Lanús",
+    "lanÃºs": "lanús",
     "MUÃECO": "MUÑECO",
     "MuÃeco": "Muñeco",
     "muÃeco": "muñeco",
@@ -60,6 +114,11 @@ def reparar_secuencias_mojibake(value: str) -> str:
         fixed = fixed.replace(bad, good)
     for bad, good in DAMAGED_SEQUENCES.items():
         fixed = fixed.replace(bad, good)
+
+    # Si quedó una Ã suelta, normalmente corresponde a una í cuyo byte C1
+    # fue removido por algún parser/terminal intermedio. Se aplica al final
+    # para no interferir con secuencias completas como Ã¡, Ã©, Ã±, etc.
+    fixed = re.sub(r"Ã(?=[A-Za-zÁÉÍÓÚáéíóúÑñ])", "í", fixed)
     return fixed
 
 
