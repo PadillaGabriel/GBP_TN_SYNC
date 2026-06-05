@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -90,6 +91,100 @@ class GBPAuditService:
             errores=errores,
             resultados=resultados,
         )
+
+
+    async def ejecutar_auditoria_productos(
+        self,
+        *,
+        limit: int | None = None,
+        concurrency: int = 3,
+        guardar_en_db: bool = True,
+    ) -> dict[str, Any]:
+        """Ejecuta auditoría real masiva GBP -> Railway.
+
+        No crea productos en Tienda Nube. No actualiza stock en Tienda Nube.
+        Valida producto, precio online y stock disponible usando las variables
+        ONLINE_PRICE_LIST_ID y ECOMMERCE_STORAGE_IDS.
+        """
+
+        started = time.perf_counter()
+        token = await self.client.autenticar()
+        catalogo = await self.client.obtener_catalogo_basico(token)
+        candidatos = [row for row in catalogo if any_website_image(row)]
+        seleccionados = candidatos[:limit] if limit else candidatos
+
+        semaphore = asyncio.Semaphore(max(1, concurrency))
+        tasks = [
+            self._procesar_candidato_completo(semaphore, token, row)
+            for row in seleccionados
+        ]
+        resultados = await asyncio.gather(*tasks)
+
+        procesados = len(resultados)
+        errores = sum(1 for row in resultados if row.get("error"))
+        publicables = sum(
+            1 for row in resultados if row.get("decision") == "PUBLICABLE_AUTOMATICO"
+        )
+        bloqueados = procesados - publicables - errores
+
+        decisiones: dict[str, int] = {}
+        for row in resultados:
+            decision = str(row.get("decision") or "ERROR_VALIDACION")
+            decisiones[decision] = decisiones.get(decision, 0) + 1
+
+        if self.db is not None and guardar_en_db:
+            productos_repo = ProductoRepository(self.db)
+            audit_repo = SyncAuditRepository(self.db)
+            for row in resultados:
+                if row.get("error"):
+                    audit_repo.registrar(
+                        sku=row.get("sku"),
+                        accion="GBP_AUDIT_PRODUCT_ERROR",
+                        estado="ERROR",
+                        mensaje=str(row.get("error")),
+                        metodo_gbp="wsItem_funGetXMLDataById/PriceListItems_funGetXMLData_Short/ItemStorage_funGetXMLData",
+                    )
+                    continue
+
+                producto = row["producto"]
+                resultado = row["resultado"]
+                producto_model = productos_repo.guardar_producto(producto)
+                productos_repo.guardar_validacion(producto_model.id, producto, resultado)
+                if producto.stock is not None:
+                    productos_repo.guardar_stock(producto_model.id, producto.stock)
+
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            audit_repo.registrar(
+                sku=None,
+                accion="GBP_AUDIT_PRODUCTS_RUN",
+                estado="OK" if errores == 0 else "OK_CON_ERRORES",
+                mensaje=(
+                    f"total_catalogo={len(catalogo)} candidatos={len(candidatos)} "
+                    f"procesados={procesados} publicables={publicables} "
+                    f"bloqueados={bloqueados} errores={errores} decisiones={decisiones}"
+                ),
+                metodo_gbp="ItemBasicData_funGetXMLData/wsItem_funGetXMLDataById/PriceListItems_funGetXMLData_Short/ItemStorage_funGetXMLData",
+                duracion_ms=duration_ms,
+            )
+
+        response = {
+            "ok": True,
+            "dry_run": self.settings.dry_run,
+            "total_catalogo": len(catalogo),
+            "candidatos_con_imagen_website": len(candidatos),
+            "procesados": procesados,
+            "publicables": publicables,
+            "bloqueados": bloqueados,
+            "errores": errores,
+            "decisiones": decisiones,
+            "online_price_list_id": self.settings.online_price_list_id,
+            "ecommerce_storage_ids": self.settings.ecommerce_storage_id_list,
+            "duration_ms": int((time.perf_counter() - started) * 1000),
+            "resultados_muestra": [
+                self._resultado_publico(row) for row in resultados[:20]
+            ],
+        }
+        return normalizar_objeto_gbp(response)
 
     async def ejecutar_prueba_producto(
         self,
@@ -193,6 +288,91 @@ class GBPAuditService:
             "stock_raw_rows": stock_rows[:10],
         }
         return normalizar_objeto_gbp(response)
+
+
+    async def _procesar_candidato_completo(
+        self,
+        semaphore: asyncio.Semaphore,
+        token: str,
+        row: dict[str, str],
+    ) -> dict[str, Any]:
+        async with semaphore:
+            item_id = row.get("item_id") or ""
+            sku = row.get("item_code")
+            try:
+                detalle = await self.client.obtener_producto_por_id(token, int(item_id))
+                detalle = {**detalle, **self._imagenes_desde_basico(row)}
+
+                precio_rows = await self.client.obtener_precio_por_item_id(
+                    token,
+                    item_id=int(item_id),
+                    price_list_id=self.settings.online_price_list_id,
+                )
+                precio = self.normalizer.normalizar_precio(
+                    precio_rows,
+                    price_list_id=self.settings.online_price_list_id,
+                )
+                if precio is not None:
+                    detalle["precio_online"] = precio.monto
+                    detalle["prli_id"] = precio.lista_precio_id or str(self.settings.online_price_list_id)
+
+                producto = self.normalizer.normalizar_producto(detalle)
+                if precio is not None:
+                    producto.precio_importado = precio
+
+                stock_rows = await self.client.obtener_stock_por_item_id(
+                    token,
+                    item_id=int(item_id),
+                    storage_id=-1,
+                )
+                try:
+                    producto.stock = self.normalizer.normalizar_stock_desde_filas(
+                        stock_rows,
+                        sku=producto.sku,
+                        id_sistema_gbp=producto.id_sistema_gbp,
+                        ecommerce_storage_ids=self.settings.ecommerce_storage_id_list,
+                    )
+                except Exception:  # noqa: BLE001 - validación debe marcar falta de stock.
+                    producto.stock = None
+
+                resultado = self.validation_service.validar_publicacion(producto)
+                return {
+                    "sku": producto.sku,
+                    "id_sistema_gbp": producto.id_sistema_gbp,
+                    "titulo": producto.titulo,
+                    "decision": resultado.decision,
+                    "publicable": resultado.publicable,
+                    "motivos": resultado.motivos_bloqueo,
+                    "precio_online": float(precio.monto) if precio else None,
+                    "stock_tn": producto.stock.cantidad if producto.stock else None,
+                    "producto": producto,
+                    "resultado": resultado,
+                }
+            except Exception as exc:  # noqa: BLE001 - se conserva error por producto.
+                logger.exception("gbp_audit_product_error", extra={"item_id": item_id, "sku": sku})
+                return normalizar_objeto_gbp({
+                    "sku": sku,
+                    "id_sistema_gbp": item_id,
+                    "titulo": row.get("item_desc"),
+                    "decision": "ERROR_VALIDACION",
+                    "publicable": False,
+                    "motivos": ["ERROR_GBP"],
+                    "error": f"{type(exc).__name__}: {exc}",
+                })
+
+    @staticmethod
+    def _resultado_publico(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "sku": row.get("sku"),
+            "id_sistema_gbp": row.get("id_sistema_gbp"),
+            "titulo": row.get("titulo"),
+            "decision": row.get("decision"),
+            "publicable": row.get("publicable"),
+            "motivos": row.get("motivos", []),
+            "precio_online": row.get("precio_online"),
+            "stock_tn": row.get("stock_tn"),
+            "error": row.get("error"),
+        }
 
     async def _procesar_candidato(
         self,

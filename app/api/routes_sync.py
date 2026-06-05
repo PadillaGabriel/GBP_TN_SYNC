@@ -21,19 +21,28 @@ async def ejecutar_sync_stock_manual() -> dict[str, object]:
 
 
 @router.post("/audit/productos/run")
-async def ejecutar_auditoria_productos_manual() -> dict[str, object]:
-    """Endpoint manual para disparar auditoria GBP completa.
+async def ejecutar_auditoria_productos_manual(
+    limit: int | None = Query(default=None, ge=1, le=5000),
+    concurrency: int = Query(default=3, ge=1, le=10),
+    save_to_db: bool = Query(default=True),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Ejecuta auditoría real de productos GBP con precio y stock.
 
-    Por seguridad, la auditoría completa queda pendiente hasta validar precio
-    online y depósitos ecommerce. Usar /sync/audit/gbp-test para prueba parcial.
+    No crea productos en Tienda Nube. No modifica stock en Tienda Nube.
+    Persiste productos, validaciones, stock y auditoría en Railway para el panel.
     """
 
     settings = get_settings()
-    return {
-        "accepted": True,
-        "dry_run": settings.dry_run,
-        "message": "Job de auditoria aceptado. Usar /sync/audit/gbp-test para prueba parcial real.",
-    }
+    try:
+        service = GBPAuditService(settings=settings, db=db)
+        return await service.ejecutar_auditoria_productos(
+            limit=limit,
+            concurrency=concurrency,
+            guardar_en_db=save_to_db,
+        )
+    except Exception as exc:  # noqa: BLE001 - diagnóstico operativo.
+        raise HTTPException(status_code=500, detail=f"Error en auditoría GBP: {exc}") from exc
 
 
 @router.post("/audit/gbp-test")
