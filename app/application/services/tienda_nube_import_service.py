@@ -115,6 +115,8 @@ class TiendaNubeImportService:
                             "payload_preview": payload,
                             "categoria": producto.categoria_nombre,
                             "subcategoria": producto.subcategoria_nombre,
+                            "descripcion_largo": len(producto.descripcion_web or ""),
+                            "descripcion_preview": (producto.descripcion_web or "")[:300],
                         }
                     )
                     continue
@@ -162,6 +164,7 @@ class TiendaNubeImportService:
                         "imagenes": len(producto.imagenes),
                         "categoria": producto.categoria_nombre,
                         "subcategoria": producto.subcategoria_nombre,
+                        "descripcion_largo": len(producto.descripcion_web or ""),
                     }
                 )
             except Exception as exc:  # noqa: BLE001 - una fila no debe cortar el lote.
@@ -233,6 +236,8 @@ class TiendaNubeImportService:
                     "precio": str(producto.precio_importado.monto) if producto.precio_importado else None,
                     "stock": producto.stock.cantidad if producto.stock else None,
                     "payload_preview": payload,
+                    "descripcion_largo": len(producto.descripcion_web or ""),
+                    "descripcion_preview": (producto.descripcion_web or "")[:300],
                     "duration_ms": int((time.perf_counter() - started) * 1000),
                 }
             )
@@ -255,6 +260,8 @@ class TiendaNubeImportService:
                     "precio": str(producto.precio_importado.monto) if producto.precio_importado else None,
                     "stock": producto.stock.cantidad if producto.stock else None,
                     "payload_preview": payload,
+                    "descripcion_largo": len(producto.descripcion_web or ""),
+                    "descripcion_preview": (producto.descripcion_web or "")[:300],
                     "duration_ms": int((time.perf_counter() - started) * 1000),
                 }
             )
@@ -304,6 +311,7 @@ class TiendaNubeImportService:
                 "tn_variant_id": tn_variant_id,
                 "precio": str(producto.precio_importado.monto) if producto.precio_importado else None,
                 "stock": producto.stock.cantidad if producto.stock else None,
+                "descripcion_largo": len(producto.descripcion_web or ""),
                 "duration_ms": int((time.perf_counter() - started) * 1000),
             }
         )

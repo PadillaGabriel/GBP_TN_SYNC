@@ -370,6 +370,8 @@ class GBPAuditService:
             "item_not_for_sale": producto.item_not_for_sale,
             "tiene_imagen_website": producto.tiene_imagen_website,
             "tiene_descripcion_web": producto.tiene_descripcion_web,
+            "descripcion_web_largo": len(producto.descripcion_web or ""),
+            "descripcion_web_preview": (producto.descripcion_web or "")[:300],
             "precio_online": float(precio.monto) if precio else None,
             "precio_online_valido": producto.precio_online_valido,
             "price_list_id": self.settings.online_price_list_id,
@@ -382,6 +384,63 @@ class GBPAuditService:
             "stock_raw_rows": stock_rows[:10],
         }
         return normalizar_objeto_gbp(response)
+
+
+
+    async def diagnosticar_descripcion_producto(
+        self,
+        *,
+        sku: str | None = None,
+        item_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Diagnostica campos descriptivos reales devueltos por GBP para un producto."""
+
+        if not sku and item_id is None:
+            raise ValueError("Debe informar sku o item_id")
+
+        token = await self.client.autenticar()
+        resolved_item_id: str | int | None = item_id
+        if resolved_item_id is None and sku:
+            resolved_item_id = await self.client.obtener_item_id_por_codigo(token, sku)
+        if resolved_item_id in (None, ""):
+            raise ValueError(f"GBP no devolvió item_id para sku={sku}")
+
+        detalle = await self.client.obtener_producto_por_id(token, int(resolved_item_id))
+        producto = self.normalizer.normalizar_producto(detalle)
+
+        campos_relevantes: list[dict[str, Any]] = []
+        for key, value in detalle.items():
+            text = str(value or "")
+            key_lower = str(key).lower()
+            if not any(token in key_lower for token in ("desc", "detail", "web", "html", "memo", "note")):
+                continue
+            campos_relevantes.append(
+                {
+                    "campo": key,
+                    "largo": len(text),
+                    "es_candidato_descripcion_web": self.normalizer._is_web_description_key(str(key)),
+                    "preview": text[:500],
+                }
+            )
+
+        campos_relevantes.sort(key=lambda item: item["largo"], reverse=True)
+
+        return normalizar_objeto_gbp(
+            {
+                "ok": True,
+                "dry_run": self.settings.dry_run,
+                "sku": producto.sku,
+                "id_sistema_gbp": producto.id_sistema_gbp,
+                "titulo": producto.titulo,
+                "descripcion_seleccionada_largo": len(producto.descripcion_web or ""),
+                "descripcion_seleccionada_preview": (producto.descripcion_web or "")[:1000],
+                "campos_relevantes": campos_relevantes,
+                "nota": (
+                    "Si un campo relevante largo aparece con es_candidato_descripcion_web=false, "
+                    "ese es el campo GBP que debe validarse como fuente de descripción web."
+                ),
+            }
+        )
 
 
     async def _procesar_candidato_completo(

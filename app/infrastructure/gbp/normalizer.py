@@ -1,4 +1,5 @@
 from decimal import Decimal, InvalidOperation
+import re
 from typing import Any
 
 from app.domain.errors import DatoIncompletoError
@@ -33,7 +34,7 @@ class GBPNormalizer:
             publicable_web=self._to_bool_or_none(data.get("item_web")),
             item_disabled=self._to_bool(data.get("item_disabled")),
             item_not_for_sale=self._to_bool(data.get("item_not4Sale")),
-            descripcion_web=self._optional_str(data, "WebSite_Description"),
+            descripcion_web=self._extract_web_description(data),
             medidas=MedidasProducto(
                 alto=self._to_decimal_or_none(data.get("item_higth")),
                 ancho=self._to_decimal_or_none(data.get("item_wide")),
@@ -152,6 +153,101 @@ class GBPNormalizer:
                 )
             ],
         )
+
+
+    @classmethod
+    def _extract_web_description(cls, data: dict[str, Any]) -> str | None:
+        """Extrae la descripcion web real desde campos GBP candidatos.
+
+        GBP puede devolver la descripcion completa bajo nombres variables de
+        campos Website/Web + Description/Desc. No se usa item_detail como fuente
+        operativa porque esa decision de negocio sigue cerrada. Si aparecen
+        varios campos web descriptivos, se elige el contenido mas largo y
+        completo, evitando campos de imagen, URL, titulo o metadata.
+        """
+
+        candidates: list[tuple[str, str]] = []
+        for key, value in data.items():
+            if value is None or str(value).strip() == "":
+                continue
+            if not cls._is_web_description_key(str(key)):
+                continue
+            text = normalizar_texto_gbp(str(value))
+            if text:
+                candidates.append((str(key), text))
+
+        if not candidates:
+            return cls._optional_str(data, "WebSite_Description")
+
+        # Si GBP parte el texto en campos numerados, unirlos en orden.
+        grouped = cls._merge_description_chunks(candidates)
+        if grouped:
+            selected = grouped
+        else:
+            # En caso de campos alternativos, usar el de mayor longitud útil.
+            selected = max(candidates, key=lambda item: len(item[1]))[1]
+
+        # Caso observado en GBP: WebSite_Description puede venir limitado a ~100
+        # caracteres, mientras que item_detail trae la misma descripción completa.
+        # La regla de negocio sigue siendo no usar item_detail genérico; solo se
+        # acepta como extensión cuando comparte el prefijo de la descripción web.
+        detail_extension = cls._detail_if_extends_web_description(data, selected)
+        return detail_extension or selected
+
+
+    @classmethod
+    def _detail_if_extends_web_description(cls, data: dict[str, Any], selected: str) -> str | None:
+        detail = cls._optional_str(data, "item_detail")
+        if not detail or not selected:
+            return None
+        if len(detail) <= max(len(selected) + 50, 180):
+            return None
+
+        selected_key = cls._comparison_prefix(selected)
+        detail_key = cls._comparison_prefix(detail)
+        if not selected_key or not detail_key:
+            return None
+        if detail_key.startswith(selected_key) or selected_key in detail_key[: max(120, len(selected_key) + 20)]:
+            return detail
+        return None
+
+    @staticmethod
+    def _comparison_prefix(value: str) -> str:
+        text = normalizar_texto_gbp(value)
+        text = re.sub(r"\s+", " ", text).strip().lower()
+        text = re.sub(r"[^a-z0-9áéíóúüñ ]", "", text)
+        return text[:80].strip()
+
+    @staticmethod
+    def _is_web_description_key(key: str) -> bool:
+        normalized = re.sub(r"[^a-z0-9]", "", key.lower())
+        if normalized == "websitedescription":
+            return True
+        if "itemdetail" in normalized:
+            return False
+        if any(excluded in normalized for excluded in ("image", "url", "title", "name", "meta", "category", "brand")):
+            return False
+        has_web = "website" in normalized or normalized.startswith("web") or "web" in normalized
+        has_desc = "description" in normalized or "descripcion" in normalized or normalized.endswith("desc")
+        return has_web and has_desc
+
+    @staticmethod
+    def _merge_description_chunks(candidates: list[tuple[str, str]]) -> str | None:
+        chunked: list[tuple[int, str]] = []
+        for key, text in candidates:
+            normalized = re.sub(r"[^a-z0-9]", "", key.lower())
+            match = re.search(r"(websitedescription|webdescription|website_desc|webdesc)([0-9]+)$", normalized)
+            if match:
+                chunked.append((int(match.group(2)), text))
+
+        if len(chunked) < 2:
+            return None
+
+        parts: list[str] = []
+        for _, text in sorted(chunked, key=lambda item: item[0]):
+            if not any(text == existing or text in existing for existing in parts):
+                parts.append(text)
+        return "\n".join(parts).strip() or None
 
     @staticmethod
     def _normalizar_imagenes(data: dict[str, Any]) -> list[ImagenProducto]:

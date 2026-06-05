@@ -112,6 +112,29 @@ async def ejecutar_prueba_producto_gbp(
     except Exception as exc:  # noqa: BLE001 - diagnóstico operativo.
         raise HTTPException(status_code=500, detail=f"Error en prueba producto GBP: {exc}") from exc
 
+
+
+@router.post("/audit/gbp-product-description-debug")
+async def diagnosticar_descripcion_producto_gbp(
+    sku: str | None = Query(default=None),
+    item_id: int | None = Query(default=None),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Diagnostica qué campos descriptivos devuelve GBP para un producto.
+
+    No crea productos en Tienda Nube. No modifica Tienda Nube.
+    Sirve para validar si WebSite_Description viene corto y si existe otro
+    campo web descriptivo con el texto completo.
+    """
+
+    settings = get_settings()
+    try:
+        service = GBPAuditService(settings=settings, db=db)
+        return await service.diagnosticar_descripcion_producto(sku=sku, item_id=item_id)
+    except Exception as exc:  # noqa: BLE001 - diagnóstico operativo.
+        raise HTTPException(status_code=500, detail=f"Error diagnosticando descripción GBP: {exc}") from exc
+
+
 @router.post("/import/tienda-nube-test")
 async def importar_prueba_tienda_nube(
     limit: int = Query(default=20, ge=1, le=50),

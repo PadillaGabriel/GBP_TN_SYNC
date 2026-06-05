@@ -257,7 +257,16 @@ def parse_dataset_tables(result_text: str) -> list[dict[str, str]]:
             continue
         row: dict[str, str] = {}
         for child in list(table):
-            row[strip_namespace(child.tag)] = extract_node_full_text(child)
+            key = strip_namespace(child.tag)
+            value = extract_node_full_text(child)
+            # Algunos métodos GBP pueden repetir nodos o fragmentar campos largos.
+            # No pisar contenido previo: concatenar conservando saltos cuando corresponde.
+            if key in row and value:
+                previous = row.get(key) or ""
+                if value not in previous:
+                    row[key] = f"{previous}\n{value}".strip() if previous else value
+            else:
+                row[key] = value
         rows.append(row)
     return rows
 
