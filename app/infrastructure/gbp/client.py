@@ -30,12 +30,7 @@ class GBPCallResult:
 
 
 class GBPClient:
-    """Cliente SOAP para métodos de lectura GBP Módulo 16.
-
-    Toda respuesta SOAP pasa por:
-    bytes HTTP -> decode_gbp_response -> extract_result_text -> parse_dataset_tables.
-    Esto evita que los textos de GBP lleguen con mojibake al dominio.
-    """
+    """Cliente SOAP para métodos de lectura GBP Módulo 16."""
 
     def __init__(
         self,
@@ -76,6 +71,19 @@ class GBPClient:
         )
         return parse_dataset_tables(call.result_text)
 
+    async def obtener_item_id_por_codigo(self, token: str, sku: str) -> str | None:
+        """Resuelve código/SKU GBP a item_id interno."""
+
+        call = await self.call_soap_method(
+            "wsgetItemIDfromCode_funGetXMLData",
+            token=token,
+            params={"strItemCode": sku},
+        )
+        rows = parse_dataset_tables(call.result_text)
+        if not rows:
+            return None
+        return rows[0].get("item_id")
+
     async def obtener_producto_por_id(self, token: str, item_id: int | str) -> dict[str, str]:
         """Obtiene ficha completa de un producto por item_id GBP."""
 
@@ -89,6 +97,57 @@ class GBPClient:
             raise RuntimeError(f"GBP no devolvió datos para item_id={item_id}")
         return rows[0]
 
+    async def obtener_precio_por_item_id(
+        self,
+        token: str,
+        *,
+        item_id: int | str,
+        price_list_id: int | str,
+    ) -> list[dict[str, str]]:
+        """Obtiene precio del artículo en una lista de precios GBP."""
+
+        call = await self.call_soap_method(
+            "PriceListItems_funGetXMLData_Short",
+            token=token,
+            params={"pPriceList": price_list_id, "pItem": int(item_id)},
+        )
+        return parse_dataset_tables(call.result_text)
+
+    async def obtener_stock_por_item_id(
+        self,
+        token: str,
+        *,
+        item_id: int | str,
+        storage_id: int | str = -1,
+    ) -> list[dict[str, str]]:
+        """Obtiene stock disponible por depósito para un artículo GBP."""
+
+        call = await self.call_soap_method(
+            "ItemStorage_funGetXMLData",
+            token=token,
+            params={"intStor_id": storage_id, "intItem_id": int(item_id)},
+        )
+        return parse_dataset_tables(call.result_text)
+
+    async def obtener_imagenes_website_por_item_id(
+        self,
+        token: str,
+        item_id: int | str,
+    ) -> dict[str, str]:
+        """Obtiene URLs Website del artículo para importación completa."""
+
+        call = await self.call_soap_method(
+            "wsGetWebSiteImagesURL4WebServices",
+            token=token,
+            params={
+                "intItemID": int(item_id),
+                "bolIsAvailable4Web": True,
+                "bolIsAvailable4FulljausAndProducteca": False,
+            },
+        )
+        rows = parse_dataset_tables(call.result_text)
+        return rows[0] if rows else {}
+
     async def call_soap_method(
         self,
         method_name: str,
@@ -96,11 +155,7 @@ class GBPClient:
         token: str = "",
         params: dict[str, object] | None = None,
     ) -> GBPCallResult:
-        """Ejecuta método SOAP y devuelve el contenido del nodo *Result.
-
-        No usar response.text directamente: puede llegar decodificado con charset
-        incorrecto. Se usa response.content y luego decode_gbp_response().
-        """
+        """Ejecuta método SOAP y devuelve el contenido del nodo *Result."""
 
         envelope = self._build_soap_envelope(
             token=token,

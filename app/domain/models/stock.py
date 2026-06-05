@@ -26,4 +26,4 @@ class StockProducto(BaseModel):
     def consultable(self) -> bool:
         """El stock es consultable si hay al menos un deposito informado."""
 
-        return bool(self.depositos)
+        return any(deposito.usado_para_tienda_nube for deposito in self.depositos)

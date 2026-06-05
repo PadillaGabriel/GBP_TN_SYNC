@@ -67,3 +67,28 @@ async def ejecutar_prueba_parcial_gbp(
         }
     except Exception as exc:  # noqa: BLE001 - se devuelve diagnóstico al operador.
         raise HTTPException(status_code=500, detail=f"Error en prueba GBP: {exc}") from exc
+
+
+@router.post("/audit/gbp-product-test")
+async def ejecutar_prueba_producto_gbp(
+    sku: str | None = Query(default=None),
+    item_id: int | None = Query(default=None),
+    save_to_db: bool = Query(default=True),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Valida un producto completo con precio online y stock disponible.
+
+    No crea productos en Tienda Nube. No modifica stock en Tienda Nube.
+    Persiste la validación localmente para que el panel pueda mostrarla.
+    """
+
+    settings = get_settings()
+    try:
+        service = GBPAuditService(settings=settings, db=db)
+        return await service.ejecutar_prueba_producto(
+            sku=sku,
+            item_id=item_id,
+            guardar_en_db=save_to_db,
+        )
+    except Exception as exc:  # noqa: BLE001 - diagnóstico operativo.
+        raise HTTPException(status_code=500, detail=f"Error en prueba producto GBP: {exc}") from exc

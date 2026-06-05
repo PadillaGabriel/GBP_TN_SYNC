@@ -7,10 +7,11 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.application.services.producto_validation_service import ProductoValidationService
 from app.infrastructure.gbp.client import GBPClient
 from app.infrastructure.gbp.normalizer import GBPNormalizer
 from app.infrastructure.gbp.xml_parser import any_website_image, has_value, normalizar_objeto_gbp
-from app.infrastructure.persistence.repositories import SyncAuditRepository
+from app.infrastructure.persistence.repositories import ProductoRepository, SyncAuditRepository
 from app.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ class GBPAuditService:
             web_service_id=settings.gbp_web_service_id,
         )
         self.normalizer = GBPNormalizer()
+        self.validation_service = ProductoValidationService()
 
     async def ejecutar_prueba_parcial(
         self,
@@ -89,6 +91,109 @@ class GBPAuditService:
             resultados=resultados,
         )
 
+    async def ejecutar_prueba_producto(
+        self,
+        *,
+        sku: str | None = None,
+        item_id: int | None = None,
+        guardar_en_db: bool = True,
+    ) -> dict[str, Any]:
+        """Valida un producto completo con precio online y stock disponible."""
+
+        if not sku and item_id is None:
+            raise ValueError("Debe informar sku o item_id")
+
+        token = await self.client.autenticar()
+        resolved_item_id: str | int | None = item_id
+        if resolved_item_id is None and sku:
+            resolved_item_id = await self.client.obtener_item_id_por_codigo(token, sku)
+        if resolved_item_id in (None, ""):
+            raise ValueError(f"GBP no devolvió item_id para sku={sku}")
+
+        detalle = await self.client.obtener_producto_por_id(token, int(resolved_item_id))
+        imagenes = await self.client.obtener_imagenes_website_por_item_id(token, int(resolved_item_id))
+        detalle = {**detalle, **self._imagenes_desde_basico(imagenes)}
+
+        precio_rows = await self.client.obtener_precio_por_item_id(
+            token,
+            item_id=int(resolved_item_id),
+            price_list_id=self.settings.online_price_list_id,
+        )
+        precio = self.normalizer.normalizar_precio(
+            precio_rows,
+            price_list_id=self.settings.online_price_list_id,
+        )
+        if precio is not None:
+            detalle["precio_online"] = precio.monto
+            detalle["prli_id"] = precio.lista_precio_id or str(self.settings.online_price_list_id)
+
+        producto = self.normalizer.normalizar_producto(detalle)
+        if precio is not None:
+            producto.precio_importado = precio
+
+        stock_rows = await self.client.obtener_stock_por_item_id(
+            token,
+            item_id=int(resolved_item_id),
+            storage_id=-1,
+        )
+        stock_error: str | None = None
+        try:
+            producto.stock = self.normalizer.normalizar_stock_desde_filas(
+                stock_rows,
+                sku=producto.sku,
+                id_sistema_gbp=producto.id_sistema_gbp,
+                ecommerce_storage_ids=self.settings.ecommerce_storage_id_list,
+            )
+        except Exception as exc:  # noqa: BLE001 - diagnóstico controlado.
+            stock_error = f"{type(exc).__name__}: {exc}"
+            producto.stock = None
+
+        resultado = self.validation_service.validar_publicacion(producto)
+
+        if self.db is not None and guardar_en_db:
+            producto_model = ProductoRepository(self.db).guardar_producto(producto)
+            ProductoRepository(self.db).guardar_validacion(producto_model.id, producto, resultado)
+            if producto.stock is not None:
+                ProductoRepository(self.db).guardar_stock(producto_model.id, producto.stock)
+            SyncAuditRepository(self.db).registrar(
+                sku=producto.sku,
+                accion="GBP_PRODUCT_TEST",
+                estado="OK" if resultado.publicable else "BLOQUEADO",
+                mensaje=(
+                    f"decision={resultado.decision} motivos={','.join(resultado.motivos_bloqueo)} "
+                    f"precio={'OK' if precio else 'NO'} stock={'OK' if producto.stock else 'NO'}"
+                ),
+                metodo_gbp="wsItem_funGetXMLDataById/PriceListItems_funGetXMLData_Short/ItemStorage_funGetXMLData",
+            )
+
+        response = {
+            "ok": True,
+            "dry_run": self.settings.dry_run,
+            "sku": producto.sku,
+            "id_sistema_gbp": producto.id_sistema_gbp,
+            "titulo": producto.titulo,
+            "categoria": producto.categoria_nombre,
+            "subcategoria": producto.subcategoria_nombre,
+            "marca": producto.marca_nombre,
+            "codigo_proveedor": producto.codigo_proveedor,
+            "item_web": producto.publicable_web,
+            "item_disabled": producto.item_disabled,
+            "item_not_for_sale": producto.item_not_for_sale,
+            "tiene_imagen_website": producto.tiene_imagen_website,
+            "tiene_descripcion_web": producto.tiene_descripcion_web,
+            "precio_online": float(precio.monto) if precio else None,
+            "precio_online_valido": producto.precio_online_valido,
+            "price_list_id": self.settings.online_price_list_id,
+            "stock": self._stock_response(producto.stock, stock_error),
+            "decision": resultado.decision,
+            "publicable": resultado.publicable,
+            "motivos": resultado.motivos_bloqueo,
+            "cumple": resultado.cumple,
+            "precio_raw_rows": precio_rows[:3],
+            "stock_raw_rows": stock_rows[:10],
+        }
+        return normalizar_objeto_gbp(response)
+
     async def _procesar_candidato(
         self,
         semaphore: asyncio.Semaphore,
@@ -132,11 +237,14 @@ class GBPAuditService:
 
     @staticmethod
     def _imagenes_desde_basico(row: dict[str, str]) -> dict[str, str]:
-        return {
-            f"item_WebSite_url4Image{index}": row.get(f"item_WebSite_url4Image{index}", "")
-            for index in range(1, 11)
-            if has_value(row.get(f"item_WebSite_url4Image{index}"))
-        }
+        mapped: dict[str, str] = {}
+        for index in range(1, 11):
+            for prefix in ("item_WebSite_url4Image", "item_WebSite_url4image"):
+                value = row.get(f"{prefix}{index}")
+                if has_value(value):
+                    mapped[f"item_WebSite_url4Image{index}"] = str(value)
+                    break
+        return mapped
 
     @staticmethod
     def _motivos_bloqueo_parcial(producto: Any) -> list[str]:
@@ -156,3 +264,20 @@ class GBPAuditService:
         if not producto.tiene_descripcion_web:
             motivos.append("SIN_DESCRIPCION_WEB")
         return motivos
+
+    @staticmethod
+    def _stock_response(stock: Any, error: str | None) -> dict[str, Any]:
+        if stock is None:
+            return {
+                "consultable": False,
+                "error": error,
+                "cantidad_tn": None,
+                "stock_original_gbp": None,
+                "depositos": [],
+            }
+        return {
+            "consultable": stock.consultable,
+            "cantidad_tn": stock.cantidad,
+            "stock_original_gbp": stock.stock_original_gbp,
+            "depositos": [deposito.model_dump() for deposito in stock.depositos],
+        }

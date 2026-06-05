@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.domain.errors import DatoIncompletoError
@@ -20,6 +20,7 @@ class GBPNormalizer:
         id_sistema = self._require_str(data, "item_id")
         titulo = self._require_str(data, "item_desc")
         precio = data.get("precio_online")
+        stock = data.get("stock_producto")
         return Producto(
             sku=sku,
             id_sistema_gbp=id_sistema,
@@ -45,11 +46,92 @@ class GBPNormalizer:
                 if precio not in (None, "")
                 else None
             ),
+            stock=stock if isinstance(stock, StockProducto) else None,
             imagenes=self._normalizar_imagenes(data),
         )
 
+    def normalizar_precio(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        price_list_id: int | str,
+    ) -> PrecioProducto | None:
+        """Normaliza precio online desde filas de PriceListItems_*.
+
+        GBP puede variar nombres de columnas según instalación. Se priorizan
+        campos conocidos y luego cualquier campo numérico cuyo nombre contenga
+        price/precio, evitando IDs.
+        """
+
+        amount: Decimal | None = None
+        price_row: dict[str, Any] | None = None
+        for row in rows:
+            amount = self._extraer_precio_de_fila(row)
+            if amount is not None:
+                price_row = row
+                break
+
+        if amount is None or amount <= Decimal("0"):
+            return None
+
+        return PrecioProducto(
+            monto=amount,
+            lista_precio_id=str(price_list_id),
+            lista_precio_nombre=self._optional_str(price_row or {}, "prli_desc"),
+        )
+
+    def normalizar_stock_desde_filas(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        sku: str,
+        id_sistema_gbp: str,
+        ecommerce_storage_ids: list[str],
+    ) -> StockProducto:
+        """Normaliza stock disponible usando campo Stock y depósitos ecommerce."""
+
+        if not rows:
+            raise DatoIncompletoError("GBP no devolvió filas de stock")
+
+        stor_ids = {str(item).strip() for item in ecommerce_storage_ids if str(item).strip()}
+        depositos: list[StockDeposito] = []
+        total_original = Decimal("0")
+        tiene_deposito_usado = False
+
+        for row in rows:
+            stor_id = self._optional_str(row, "stor_id") or ""
+            stock_value = self._to_decimal_or_none(row.get("Stock"))
+            if stock_value is None:
+                continue
+
+            usado = bool(stor_ids) and stor_id in stor_ids
+            if usado:
+                total_original += stock_value
+                tiene_deposito_usado = True
+
+            depositos.append(
+                StockDeposito(
+                    stor_id=stor_id,
+                    stock_disponible=max(0, int(stock_value)),
+                    stock_original=float(stock_value),
+                    usado_para_tienda_nube=usado,
+                )
+            )
+
+        if not depositos:
+            raise DatoIncompletoError("GBP no devolvió stock disponible utilizable")
+
+        stock_tn = max(0, int(total_original)) if tiene_deposito_usado else 0
+        return StockProducto(
+            sku=sku,
+            id_sistema_gbp=id_sistema_gbp,
+            cantidad=stock_tn,
+            stock_original_gbp=float(total_original) if tiene_deposito_usado else None,
+            depositos=depositos,
+        )
+
     def normalizar_stock(self, data: dict[str, Any]) -> StockProducto:
-        """Normaliza stock operativo usando el campo Stock de GBP."""
+        """Normaliza una fila simple de stock operativo usando campo Stock."""
 
         sku = self._require_str(data, "sku")
         cantidad = data.get("stock")
@@ -79,6 +161,37 @@ class GBPNormalizer:
             if url:
                 imagenes.append(ImagenProducto(url=url, orden=index))
         return imagenes
+
+    @classmethod
+    def _extraer_precio_de_fila(cls, row: dict[str, Any]) -> Decimal | None:
+        known_keys = (
+            "price",
+            "Price",
+            "PRICE",
+            "precio",
+            "Precio",
+            "PRECIO",
+            "prliitem_price",
+            "prlii_price",
+            "pli_price",
+            "item_price",
+            "sale_price",
+            "price_value",
+        )
+        for key in known_keys:
+            value = cls._to_decimal_or_none(row.get(key))
+            if value is not None:
+                return value
+
+        for key, value in row.items():
+            key_lower = str(key).lower()
+            if "id" in key_lower or "code" in key_lower:
+                continue
+            if "price" in key_lower or "precio" in key_lower:
+                parsed = cls._to_decimal_or_none(value)
+                if parsed is not None:
+                    return parsed
+        return None
 
     @staticmethod
     def _require_str(data: dict[str, Any], key: str) -> str:
@@ -110,7 +223,10 @@ class GBPNormalizer:
     def _to_decimal_or_none(value: object) -> Decimal | None:
         if value is None or str(value).strip() == "":
             return None
+        text = str(value).strip().replace("$", "").replace(" ", "")
+        if "," in text and "." not in text:
+            text = text.replace(",", ".")
         try:
-            return Decimal(str(value))
-        except Exception:
+            return Decimal(text)
+        except (InvalidOperation, ValueError):
             return None
