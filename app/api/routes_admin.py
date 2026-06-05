@@ -38,6 +38,8 @@ def dashboard(db: Session = Depends(get_db_session)) -> dict[str, object]:
         "stock_sync_interval_minutes": settings.stock_sync_interval_minutes,
         "productos_auditados": resumen["productos_auditados"],
         "productos_mapeados_tienda_nube": resumen["productos_mapeados_tienda_nube"],
+        "productos_mapeados_locales": resumen.get("productos_mapeados_locales"),
+        "productos_mapeados_eliminados": resumen.get("productos_mapeados_eliminados"),
         "productos_importados": resumen["productos_mapeados_tienda_nube"],
         "publicables_total": resumen["publicables_total"],
         "publicables_pendientes_importar": resumen["publicables_pendientes_importar"],
@@ -168,6 +170,39 @@ async def eliminar_producto_tienda_nube(
             "sku": sku,
             "error": f"{type(exc).__name__}: {exc}",
         }
+
+
+@router.post("/decisiones/reconciliar-tn")
+async def reconciliar_mapeos_tienda_nube(
+    limit: int = Query(default=500, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Revisa mapeos locales contra Tienda Nube y marca los borrados externamente."""
+
+    settings = get_settings()
+    try:
+        service = TiendaNubeImportService(settings=settings, db=db)
+        return await service.reconciliar_mapeos_tienda_nube(limit=limit, offset=offset)
+    except Exception as exc:  # noqa: BLE001 - diagnóstico operativo.
+        logger.exception("TN_RECONCILE_ENDPOINT_ERROR")
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+@router.post("/decisiones/mapeos/marcar-eliminados-externos")
+def marcar_mapeos_eliminados_externos(
+    confirm: bool = Query(default=False),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Marca mapeos locales como eliminado_externo cuando Tienda Nube fue limpiada manualmente."""
+
+    settings = get_settings()
+    try:
+        service = TiendaNubeImportService(settings=settings, db=db)
+        return service.marcar_mapeos_como_eliminados_externos(confirm=confirm)
+    except Exception as exc:  # noqa: BLE001 - diagnóstico operativo.
+        logger.exception("TN_MARK_EXTERNAL_DELETED_ENDPOINT_ERROR")
+        return {"ok": False, "confirm": confirm, "error": f"{type(exc).__name__}: {exc}"}
 
 
 @router.get("/depositos")
@@ -391,6 +426,8 @@ def panel_decisiones(
         "stock_sync_interval_minutes": settings.stock_sync_interval_minutes,
         "productos_auditados": resumen["productos_auditados"],
         "productos_mapeados_tienda_nube": resumen["productos_mapeados_tienda_nube"],
+        "productos_mapeados_locales": resumen.get("productos_mapeados_locales"),
+        "productos_mapeados_eliminados": resumen.get("productos_mapeados_eliminados"),
         "productos_importados": resumen["productos_mapeados_tienda_nube"],
         "publicables_total": resumen["publicables_total"],
         "publicables_pendientes_importar": resumen["publicables_pendientes_importar"],
@@ -432,6 +469,44 @@ def panel_decisiones(
             "settings": settings,
         },
     )
+
+
+@router.post("/panel/decisiones/reconciliar-tn")
+async def panel_reconciliar_mapeos_tienda_nube(
+    estado: str = Query(default="requiere_revision"),
+    q: str | None = Query(default=None),
+    limit: int = Query(default=500, ge=1, le=1000),
+    db: Session = Depends(get_db_session),
+) -> RedirectResponse:
+    """Acción visual: verifica si los productos mapeados siguen existiendo en Tienda Nube."""
+
+    settings = get_settings()
+    service = TiendaNubeImportService(settings=settings, db=db)
+    result = await service.reconciliar_mapeos_tienda_nube(limit=limit)
+    mensaje = (
+        f"Reconciliación finalizada. Verificados: {result.get('verificados', 0)}. "
+        f"Marcados eliminado_externo: {result.get('marcados_eliminados_externos', 0)}. "
+        f"Errores: {result.get('errores', 0)}."
+    )
+    return _panel_redirect(estado, mensaje, q=q)
+
+
+@router.post("/panel/decisiones/mapeos/marcar-eliminados-externos")
+def panel_marcar_mapeos_eliminados_externos(
+    estado: str = Query(default="requiere_revision"),
+    q: str | None = Query(default=None),
+    db: Session = Depends(get_db_session),
+) -> RedirectResponse:
+    """Acción visual: marca todos los mapeos locales como eliminados externamente."""
+
+    settings = get_settings()
+    service = TiendaNubeImportService(settings=settings, db=db)
+    result = service.marcar_mapeos_como_eliminados_externos(confirm=True)
+    mensaje = (
+        f"Mapeos marcados como eliminado_externo: "
+        f"{result.get('mapeos_marcados_eliminado_externo', 0)}."
+    )
+    return _panel_redirect(estado, mensaje, q=q)
 
 
 @router.post("/panel/decisiones/{sku}/ocultar-tn")

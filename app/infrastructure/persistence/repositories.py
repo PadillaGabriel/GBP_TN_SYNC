@@ -18,6 +18,9 @@ from app.infrastructure.persistence.models import (
 )
 
 
+MAPEO_TN_ESTADOS_INACTIVOS = ("eliminado_tn", "eliminado_externo")
+
+
 class ProductoRepository:
     """Repositorio de productos normalizados."""
 
@@ -129,9 +132,10 @@ class ProductoRepository:
     def listar_publicables_para_importar(self, limit: int = 20) -> list[dict[str, object]]:
         """Lista productos validados como publicables para importación controlada.
 
-        Excluye productos ya mapeados en Tienda Nube para que los lotes de
-        importación controlada no vuelvan a seleccionar los mismos SKUs. Si se
-        necesita reimportar un SKU existente, usar el endpoint manual.
+        Excluye productos con mapeo activo en Tienda Nube para que los lotes de
+        importación controlada no vuelvan a seleccionar los mismos SKUs. Si el
+        mapeo local quedó marcado como eliminado_tn/eliminado_externo, el SKU
+        vuelve a quedar disponible para una nueva carga controlada.
         """
 
         rows = self.db.execute(
@@ -146,7 +150,12 @@ class ProductoRepository:
                 isouter=True,
             )
             .where(ProductoValidacionModel.decision == "PUBLICABLE_AUTOMATICO")
-            .where(ProductoTiendaNubeModel.id.is_(None))
+            .where(
+                or_(
+                    ProductoTiendaNubeModel.id.is_(None),
+                    ProductoTiendaNubeModel.estado_publicacion.in_(MAPEO_TN_ESTADOS_INACTIVOS),
+                )
+            )
             .order_by(ProductoFuenteModel.ultima_validacion.desc().nullslast())
             .limit(limit)
         ).all()
@@ -207,9 +216,33 @@ class ProductoRepository:
         return {str(decision): int(count) for decision, count in rows}
 
     def contar_mapeos_tienda_nube(self) -> int:
-        """Cuenta productos con mapeo local hacia Tienda Nube."""
+        """Cuenta productos con mapeo activo hacia Tienda Nube."""
+
+        return int(
+            self.db.scalar(
+                select(func.count(ProductoTiendaNubeModel.id)).where(
+                    ProductoTiendaNubeModel.estado_publicacion.notin_(MAPEO_TN_ESTADOS_INACTIVOS)
+                )
+            )
+            or 0
+        )
+
+    def contar_mapeos_tienda_nube_locales(self) -> int:
+        """Cuenta todos los mapeos locales, incluidos los marcados como eliminados."""
 
         return int(self.db.scalar(select(func.count(ProductoTiendaNubeModel.id))) or 0)
+
+    def contar_mapeos_tienda_nube_eliminados(self) -> int:
+        """Cuenta mapeos locales que ya no deben considerarse importados activos."""
+
+        return int(
+            self.db.scalar(
+                select(func.count(ProductoTiendaNubeModel.id)).where(
+                    ProductoTiendaNubeModel.estado_publicacion.in_(MAPEO_TN_ESTADOS_INACTIVOS)
+                )
+            )
+            or 0
+        )
 
     def contar_publicables_pendientes_importar(self) -> int:
         """Cuenta publicables sin mapeo en Tienda Nube."""
@@ -227,7 +260,12 @@ class ProductoRepository:
                     isouter=True,
                 )
                 .where(ProductoValidacionModel.decision == "PUBLICABLE_AUTOMATICO")
-                .where(ProductoTiendaNubeModel.id.is_(None))
+                .where(
+                    or_(
+                        ProductoTiendaNubeModel.id.is_(None),
+                        ProductoTiendaNubeModel.estado_publicacion.in_(MAPEO_TN_ESTADOS_INACTIVOS),
+                    )
+                )
             )
             or 0
         )
@@ -244,6 +282,7 @@ class ProductoRepository:
                     ProductoValidacionModel.producto_fuente_id == ProductoFuenteModel.id,
                 )
                 .where(ProductoValidacionModel.decision != "PUBLICABLE_AUTOMATICO")
+                .where(ProductoTiendaNubeModel.estado_publicacion.notin_(MAPEO_TN_ESTADOS_INACTIVOS))
             )
             or 0
         )
@@ -259,6 +298,8 @@ class ProductoRepository:
         return {
             "productos_auditados": productos_auditados,
             "productos_mapeados_tienda_nube": productos_mapeados,
+            "productos_mapeados_locales": self.contar_mapeos_tienda_nube_locales(),
+            "productos_mapeados_eliminados": self.contar_mapeos_tienda_nube_eliminados(),
             "publicables_total": publicables_total,
             "publicables_pendientes_importar": self.contar_publicables_pendientes_importar(),
             "bloqueados_total": bloqueados_total,
@@ -351,6 +392,40 @@ class ProductoRepository:
         self.db.refresh(model)
         return model
 
+    def listar_mapeos_tienda_nube(self, limit: int = 500, offset: int = 0) -> list[ProductoTiendaNubeModel]:
+        """Lista mapeos locales hacia Tienda Nube para reconciliación."""
+
+        return list(
+            self.db.scalars(
+                select(ProductoTiendaNubeModel)
+                .order_by(ProductoTiendaNubeModel.updated_at.desc())
+                .offset(offset)
+                .limit(limit)
+            ).all()
+        )
+
+    def marcar_todos_mapeos_como_eliminados_externos(self) -> int:
+        """Marca todos los mapeos activos como eliminados externamente."""
+
+        rows = list(
+            self.db.scalars(
+                select(ProductoTiendaNubeModel).where(
+                    ProductoTiendaNubeModel.estado_publicacion.notin_(MAPEO_TN_ESTADOS_INACTIVOS)
+                )
+            ).all()
+        )
+        now = datetime.now(UTC)
+        for row in rows:
+            row.estado_publicacion = "eliminado_externo"
+            row.ultima_sync_completa = now
+        self.db.commit()
+        return len(rows)
+
+    def es_mapeo_tienda_nube_activo(self, mapeo: ProductoTiendaNubeModel | None) -> bool:
+        """Indica si el mapeo representa una publicación vigente en Tienda Nube."""
+
+        return bool(mapeo and mapeo.estado_publicacion not in MAPEO_TN_ESTADOS_INACTIVOS)
+
     def listar_panel_decisiones(
         self,
         *,
@@ -440,7 +515,8 @@ class ProductoRepository:
 
         stock_publicable = self._stock_publicable_tn(producto.id)
         decision = validacion.decision if validacion else "SIN_VALIDAR"
-        importado = mapeo is not None
+        tuvo_mapeo = mapeo is not None
+        importado = self.es_mapeo_tienda_nube_activo(mapeo)
         bloqueado = decision != "PUBLICABLE_AUTOMATICO"
         acciones: list[str] = []
         if importado:
@@ -463,6 +539,7 @@ class ProductoRepository:
             "motivos_bloqueo": validacion.motivos_bloqueo.split(",") if validacion and validacion.motivos_bloqueo else [],
             "descripcion_largo": len(producto.descripcion_web or ""),
             "ya_importado_tienda_nube": importado,
+            "tuvo_mapeo_tienda_nube": tuvo_mapeo,
             "tn_product_id": mapeo.tn_product_id if mapeo else None,
             "tn_variant_id": mapeo.tn_variant_id if mapeo else None,
             "estado_publicacion": mapeo.estado_publicacion if mapeo else None,
@@ -512,7 +589,8 @@ class ProductoRepository:
             {
                 "stock_publicable_tn": self._stock_publicable_tn(producto.id),
                 "descripcion_largo": len(producto.descripcion_web or ""),
-                "ya_importado_tienda_nube": mapeo is not None,
+                "ya_importado_tienda_nube": self.es_mapeo_tienda_nube_activo(mapeo),
+                "tuvo_mapeo_tienda_nube": mapeo is not None,
                 "tn_product_id": mapeo.tn_product_id if mapeo else None,
                 "accion_manual_disponible": True,
                 "endpoint_importacion_manual": f"/sync/import/tienda-nube-manual?sku={producto.sku}&forzar=true&confirm=true",

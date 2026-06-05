@@ -364,3 +364,22 @@ small,
   .search-form { grid-template-columns: 1fr; }
   .layout { padding: 1rem; }
 }
+
+.maintenance-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.btn.danger-outline {
+  color: #fecaca;
+  border-color: rgba(239, 68, 68, 0.65);
+  background: rgba(127, 29, 29, 0.35);
+}
+
+.state-cell small {
+  display: block;
+  color: var(--muted);
+  margin-top: 4px;
+}

@@ -40,6 +40,18 @@ class TiendaNubeClient:
             response.raise_for_status()
             return response.json()
 
+
+    async def get_product(self, product_id: str) -> dict[str, Any] | None:
+        """Obtiene producto por ID; devuelve None si no existe."""
+
+        url = f"{self.base_url}/{self.store_id}/products/{product_id}"
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(url, headers=self.headers)
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return response.json()
+
     async def create_product(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Crea producto en Tienda Nube."""
 

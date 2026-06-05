@@ -35,7 +35,8 @@
       <article class="summary-card"><span>Ambiente</span><strong>{{ dashboard.app_env }}</strong></article>
       <article class="summary-card {% if settings.dry_run %}safe{% else %}danger{% endif %}"><span>DRY_RUN</span><strong>{{ settings.dry_run }}</strong></article>
       <article class="summary-card"><span>Auditados</span><strong>{{ dashboard.productos_auditados }}</strong></article>
-      <article class="summary-card"><span>Mapeados TN</span><strong>{{ dashboard.productos_mapeados_tienda_nube }}</strong></article>
+      <article class="summary-card"><span>Mapeados TN activos</span><strong>{{ dashboard.productos_mapeados_tienda_nube }}</strong></article>
+      <article class="summary-card"><span>Mapeos eliminados</span><strong>{{ dashboard.productos_mapeados_eliminados or 0 }}</strong></article>
       <article class="summary-card"><span>Publicables</span><strong>{{ dashboard.publicables_total }}</strong></article>
       <article class="summary-card"><span>Pendientes</span><strong>{{ dashboard.publicables_pendientes_importar }}</strong></article>
       <article class="summary-card"><span>Bloqueados</span><strong>{{ dashboard.bloqueados_total }}</strong></article>
@@ -57,6 +58,15 @@
         <button type="submit">Buscar</button>
         {% if q %}<a class="clear-link" href="/admin/panel/decisiones?estado={{ estado }}&limit={{ limit }}">Limpiar</a>{% endif %}
       </form>
+
+      <div class="maintenance-actions">
+        <form method="post" action="/admin/panel/decisiones/reconciliar-tn?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Reconciliar con Tienda Nube" data-confirm-text="Se verificará si los productos mapeados localmente siguen existiendo en Tienda Nube. No crea ni elimina publicaciones. Solo corrige estados locales." data-confirm-kind="secondary">
+          <button class="btn secondary" type="submit">Reconciliar TN</button>
+        </form>
+        <form method="post" action="/admin/panel/decisiones/mapeos/marcar-eliminados-externos?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Marcar mapeos como eliminados externos" data-confirm-text="Usar solo si ya eliminaste manualmente las publicaciones en Tienda Nube. Los mapeos locales pasarán a eliminado_externo y esos SKUs podrán importarse nuevamente si siguen publicables." data-confirm-kind="danger">
+          <button class="btn danger-outline" type="submit">Reset mapeos locales</button>
+        </form>
+      </div>
     </section>
 
     <section class="table-card">
@@ -113,7 +123,12 @@
                 <td>
                   {% if imported %}<span class="status-dot yes">Sí</span>{% else %}<span class="status-dot no">No</span>{% endif %}
                 </td>
-                <td>{{ item.estado_publicacion or '-' }}</td>
+                <td class="state-cell">
+                  {{ item.estado_publicacion or '-' }}
+                  {% if item.tuvo_mapeo_tienda_nube and not imported %}
+                    <small>no cuenta como importado activo</small>
+                  {% endif %}
+                </td>
                 <td>{{ item.tn_product_id or '-' }}</td>
                 <td>
                   <div class="action-stack">

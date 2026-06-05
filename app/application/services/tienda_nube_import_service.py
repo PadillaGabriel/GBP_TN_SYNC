@@ -448,6 +448,134 @@ class TiendaNubeImportService:
             }
         )
 
+    async def reconciliar_mapeos_tienda_nube(
+        self,
+        *,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Verifica mapeos locales contra Tienda Nube y marca como eliminado_externo si no existen.
+
+        No crea, no actualiza y no elimina productos en Tienda Nube. Solo corrige el estado local
+        para que el panel y el selector de importación no consideren vigente una publicación borrada
+        manualmente en Tienda Nube.
+        """
+
+        started = time.perf_counter()
+        client = self._crear_tienda_nube_adapter().client
+        mapeos = self.productos_repo.listar_mapeos_tienda_nube(limit=limit, offset=offset)
+        resumen: dict[str, Any] = {
+            "ok": True,
+            "limit": limit,
+            "offset": offset,
+            "verificados": 0,
+            "existentes_tienda_nube": 0,
+            "marcados_eliminados_externos": 0,
+            "omitidos_sin_tn_product_id": 0,
+            "errores": 0,
+            "resultados": [],
+            "duration_ms": None,
+        }
+
+        for mapeo in mapeos:
+            if not mapeo.tn_product_id:
+                resumen["omitidos_sin_tn_product_id"] += 1
+                continue
+            try:
+                resumen["verificados"] += 1
+                product = await client.get_product(mapeo.tn_product_id)
+                if product is None:
+                    self.productos_repo.actualizar_estado_mapeo_tienda_nube(mapeo.sku, "eliminado_externo")
+                    resumen["marcados_eliminados_externos"] += 1
+                    resumen["resultados"].append(
+                        {
+                            "sku": mapeo.sku,
+                            "tn_product_id": mapeo.tn_product_id,
+                            "estado": "ELIMINADO_EXTERNO",
+                        }
+                    )
+                    continue
+                resumen["existentes_tienda_nube"] += 1
+                resumen["resultados"].append(
+                    {
+                        "sku": mapeo.sku,
+                        "tn_product_id": mapeo.tn_product_id,
+                        "estado": "EXISTE_EN_TIENDA_NUBE",
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001 - una verificación no debe cortar el lote.
+                logger.exception("tn_reconcile_mapping_failed", extra={"sku": mapeo.sku})
+                self.db.rollback()
+                resumen["errores"] += 1
+                resumen["resultados"].append(
+                    {
+                        "sku": mapeo.sku,
+                        "tn_product_id": mapeo.tn_product_id,
+                        "estado": "ERROR",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+
+        resumen["duration_ms"] = int((time.perf_counter() - started) * 1000)
+        resumen["ok"] = resumen["errores"] == 0
+        self.audit_repo.registrar(
+            sku=None,
+            accion="TN_RECONCILE_MAPPINGS",
+            estado="OK" if resumen["ok"] else "OK_CON_ERRORES",
+            mensaje=(
+                f"verificados={resumen['verificados']} existentes={resumen['existentes_tienda_nube']} "
+                f"eliminados_externos={resumen['marcados_eliminados_externos']} errores={resumen['errores']}"
+            ),
+            metodo_gbp="TiendaNubeClient.get_product",
+            duracion_ms=int(resumen["duration_ms"] or 0),
+        )
+        return normalizar_objeto_gbp(resumen)
+
+    def marcar_mapeos_como_eliminados_externos(
+        self,
+        *,
+        confirm: bool = False,
+    ) -> dict[str, Any]:
+        """Marca todos los mapeos activos como eliminados externamente.
+
+        Usar cuando se borraron manualmente productos desde Tienda Nube y se quiere reiniciar
+        la carga sin borrar auditoría ni productos fuente. No toca Tienda Nube.
+        """
+
+        started = time.perf_counter()
+        if not confirm:
+            return normalizar_objeto_gbp(
+                {
+                    "ok": False,
+                    "confirm": confirm,
+                    "ejecuta_tienda_nube": False,
+                    "estado": "REQUIERE_CONFIRMACION",
+                    "mensaje": "Enviar confirm=true para marcar los mapeos locales como eliminado_externo.",
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                }
+            )
+
+        marcados = self.productos_repo.marcar_todos_mapeos_como_eliminados_externos()
+        self.audit_repo.registrar(
+            sku=None,
+            accion="TN_MARK_ALL_MAPPINGS_EXTERNAL_DELETED",
+            estado="OK",
+            mensaje=f"mapeos_marcados_eliminado_externo={marcados}",
+            metodo_gbp="ProductoRepository.marcar_todos_mapeos_como_eliminados_externos",
+            duracion_ms=int((time.perf_counter() - started) * 1000),
+        )
+        return normalizar_objeto_gbp(
+            {
+                "ok": True,
+                "confirm": confirm,
+                "ejecuta_tienda_nube": False,
+                "estado": "OK",
+                "mapeos_marcados_eliminado_externo": marcados,
+                "mensaje": "Los mapeos locales quedaron como eliminado_externo. La próxima importación automática podrá seleccionar nuevamente esos SKUs si siguen publicables.",
+                "duration_ms": int((time.perf_counter() - started) * 1000),
+            }
+        )
+
     async def _obtener_producto_publicable(self, *, token: str, item_id: str):
         detalle = await self.gbp_client.obtener_producto_por_id(token, int(item_id))
         imagenes = await self.gbp_client.obtener_imagenes_website_por_item_id(token, int(item_id))
