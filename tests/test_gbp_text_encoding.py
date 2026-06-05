@@ -57,3 +57,27 @@ def test_clean_xml_repara_mojibake_antes_de_remover_invalidos():
     rows = parse_dataset_tables(xml)
     assert rows[0]["item_desc"] == "MUÑECO"
     assert rows[0]["cat_desc"] == "Decoración"
+
+
+def test_decode_gbp_response_prefiere_utf8() -> None:
+    from app.infrastructure.gbp.xml_parser import decode_gbp_response
+
+    content = "Decoración Genérica MUÑECO".encode("utf-8")
+
+    assert decode_gbp_response(content) == "Decoración Genérica MUÑECO"
+
+
+def test_normalizar_objeto_gbp_recursivo() -> None:
+    from app.infrastructure.gbp.xml_parser import normalizar_objeto_gbp
+
+    data = {
+        "titulo": "MUÃ‘ECO",
+        "categoria": "DecoraciÃ³n",
+        "items": [{"marca": "GenÃ©rica"}],
+    }
+
+    assert normalizar_objeto_gbp(data) == {
+        "titulo": "MUÑECO",
+        "categoria": "Decoración",
+        "items": [{"marca": "Genérica"}],
+    }

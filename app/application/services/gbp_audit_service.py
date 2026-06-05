@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.infrastructure.gbp.client import GBPClient
 from app.infrastructure.gbp.normalizer import GBPNormalizer
-from app.infrastructure.gbp.xml_parser import any_website_image, has_value
+from app.infrastructure.gbp.xml_parser import any_website_image, has_value, normalizar_objeto_gbp
 from app.infrastructure.persistence.repositories import SyncAuditRepository
 from app.settings import Settings
 
@@ -103,7 +103,7 @@ class GBPAuditService:
                 producto = self.normalizer.normalizar_producto(detalle)
                 motivos = self._motivos_bloqueo_parcial(producto)
                 decision = "PUBLICABLE_PARCIAL" if not motivos else "BLOQUEADO_PARCIAL"
-                return {
+                return normalizar_objeto_gbp({
                     "sku": producto.sku,
                     "id_sistema_gbp": producto.id_sistema_gbp,
                     "titulo": producto.titulo,
@@ -118,17 +118,17 @@ class GBPAuditService:
                     "tiene_descripcion_web": producto.tiene_descripcion_web,
                     "decision": decision,
                     "motivos": motivos,
-                }
+                })
             except Exception as exc:  # noqa: BLE001 - respuesta controlada de diagnóstico.
                 logger.exception("gbp_test_item_error", extra={"item_id": item_id})
-                return {
+                return normalizar_objeto_gbp({
                     "sku": row.get("item_code"),
                     "id_sistema_gbp": item_id,
                     "titulo": row.get("item_desc"),
                     "decision": "ERROR_CONSULTA_DETALLE",
                     "motivos": ["ERROR_GBP"],
                     "error": f"{type(exc).__name__}: {exc}",
-                }
+                })
 
     @staticmethod
     def _imagenes_desde_basico(row: dict[str, str]) -> dict[str, str]:

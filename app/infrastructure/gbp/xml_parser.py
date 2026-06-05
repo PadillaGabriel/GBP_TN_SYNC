@@ -112,6 +112,44 @@ def clean_xml_text(text: str) -> str:
     return cleaned
 
 
+
+def decode_gbp_response(content: bytes, fallback_text: str | None = None) -> str:
+    """Decodifica respuestas GBP evitando mojibake por charset incorrecto.
+
+    Algunas respuestas llegan como bytes UTF-8 aunque el encabezado o el
+    cliente HTTP puedan interpretarlas como Latin-1/CP1252. Priorizar UTF-8
+    evita que textos como "Decoración" se transformen en "DecoraciÃ³n" antes
+    del parseo.
+    """
+
+    if not content:
+        return fallback_text or ""
+
+    for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin1"):
+        try:
+            decoded = content.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        if decoded:
+            return decoded
+
+    return fallback_text or content.decode("utf-8", errors="replace")
+
+
+def normalizar_objeto_gbp(value):
+    """Normaliza recursivamente textos GBP en dict/list para respuestas JSON."""
+
+    if isinstance(value, str):
+        return normalizar_texto_gbp(value)
+    if isinstance(value, list):
+        return [normalizar_objeto_gbp(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(normalizar_objeto_gbp(item) for item in value)
+    if isinstance(value, dict):
+        return {key: normalizar_objeto_gbp(item) for key, item in value.items()}
+    return value
+
+
 def parse_xml(xml_text: str) -> ET.Element:
     """Parsea XML de GBP de manera controlada."""
 

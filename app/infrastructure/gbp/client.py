@@ -8,7 +8,7 @@ from xml.sax.saxutils import escape
 
 import httpx
 
-from app.infrastructure.gbp.xml_parser import extract_result_text, parse_dataset_tables
+from app.infrastructure.gbp.xml_parser import decode_gbp_response, extract_result_text, parse_dataset_tables
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ class GBPClient:
         duration_ms = int((time.perf_counter() - started) * 1000)
         logger.info("gbp_call_ok", extra={"method": method_name, "duration_ms": duration_ms})
         return GBPCallResult(
-            result_text=extract_result_text(response.text, method_name),
+            result_text=extract_result_text(decode_gbp_response(response.content, response.text), method_name),
             duration_ms=duration_ms,
         )
 
