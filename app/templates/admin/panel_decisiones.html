@@ -59,6 +59,15 @@
         {% if q %}<a class="clear-link" href="/admin/panel/decisiones?estado={{ estado }}&limit={{ limit }}">Limpiar</a>{% endif %}
       </form>
 
+      <div class="sku-import-card">
+        <form method="post" action="/admin/panel/importar-sku?estado=importado" data-confirm-title="Importar SKU puntual" data-confirm-text="Se buscará el SKU en GBP, se validará, se guardará localmente y se importará/actualizará en Tienda Nube. Si DRY_RUN=false escribirá realmente." data-confirm-kind="primary">
+          <label for="sku-import">Importar SKU puntual</label>
+          <input id="sku-import" name="sku" placeholder="Ej: 6130BL" required>
+          <label class="checkbox-inline"><input type="checkbox" name="forzar" value="true"> Forzar si está bloqueado</label>
+          <button class="btn primary" type="submit">Buscar e importar SKU</button>
+        </form>
+      </div>
+
       <div class="maintenance-actions ops-actions">
         <form method="post" action="/admin/panel/auditar-proximos?batch_limit=50&estado=publicable_pendiente" data-confirm-title="Auditar próximos 50" data-confirm-text="Se auditarán los próximos 50 productos con imagen Website que todavía no fueron auditados. No se crean productos en Tienda Nube." data-confirm-kind="secondary">
           <button class="btn secondary" type="submit">Auditar próximos 50</button>
@@ -66,11 +75,17 @@
         <form method="post" action="/admin/panel/auditar-proximos?batch_limit=200&estado=publicable_pendiente" data-confirm-title="Auditar próximos 200" data-confirm-text="Se auditarán los próximos 200 productos no auditados. Este proceso puede tardar varios minutos." data-confirm-kind="secondary">
           <button class="btn secondary" type="submit">Auditar próximos 200</button>
         </form>
+        <form method="post" action="/admin/panel/jobs/auditar-todo?batch_limit=200&concurrency=3" data-async-job="true" data-confirm-title="Auditar todo" data-confirm-text="Se auditarán todos los productos GBP pendientes con imagen Website, por tandas, en segundo plano. No se crean productos en Tienda Nube." data-confirm-kind="secondary">
+          <button class="btn secondary strong" type="submit">Auditar todo</button>
+        </form>
         <form method="post" action="/admin/panel/importar-pendientes?batch_limit=25&estado=importado" data-confirm-title="Importar pendientes" data-confirm-text="Se importarán hasta 25 productos publicables pendientes. Con DRY_RUN=false escribirá en Tienda Nube." data-confirm-kind="primary">
           <button class="btn primary" type="submit">Importar pendientes 25</button>
         </form>
         <form method="post" action="/admin/panel/importar-pendientes?batch_limit=50&estado=importado" data-confirm-title="Importar pendientes" data-confirm-text="Se importarán hasta 50 productos publicables pendientes. Con DRY_RUN=false escribirá en Tienda Nube." data-confirm-kind="primary">
           <button class="btn primary" type="submit">Importar pendientes 50</button>
+        </form>
+        <form method="post" action="/admin/panel/jobs/importar-todo?batch_limit=50" data-async-job="true" data-confirm-title="Importar todo" data-confirm-text="Se importarán todos los productos publicables pendientes, por tandas, en segundo plano. Con DRY_RUN=false escribirá realmente en Tienda Nube." data-confirm-kind="danger">
+          <button class="btn danger strong" type="submit">Importar todo</button>
         </form>
         <form method="post" action="/admin/panel/decisiones/reconciliar-tn?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Reconciliar con Tienda Nube" data-confirm-text="Se verificará si los productos mapeados localmente siguen existiendo en Tienda Nube. No crea ni elimina publicaciones. Solo corrige estados locales." data-confirm-kind="secondary">
           <button class="btn secondary" type="submit">Reconciliar TN</button>
@@ -184,6 +199,21 @@
         <button id="confirm-submit" class="btn primary" value="confirm">Confirmar</button>
       </div>
     </form>
+  </dialog>
+
+
+
+  <dialog id="progress-modal" class="confirm-modal progress-modal">
+    <div class="modal-box">
+      <h2 id="progress-title">Proceso en ejecución</h2>
+      <p id="progress-status">Iniciando...</p>
+      <div class="progress-track"><div id="progress-bar" class="progress-bar" style="width: 0%"></div></div>
+      <pre id="progress-details" class="progress-details"></pre>
+      <div class="modal-actions">
+        <button id="progress-close" class="btn secondary" type="button">Cerrar</button>
+        <a id="progress-refresh" class="btn primary" href="/admin/panel">Actualizar panel</a>
+      </div>
+    </div>
   </dialog>
 
   <script src="{{ url_for('static', path='/admin/panel.js') }}"></script>

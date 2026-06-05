@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from decimal import Decimal
+import json
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -723,6 +724,98 @@ class SyncJobRepository:
 
     def __init__(self, db: Session) -> None:
         self.db = db
+
+    def crear(
+        self,
+        *,
+        tipo: str,
+        sku: str | None = None,
+        id_sistema_gbp: str | None = None,
+        prioridad: int = 100,
+        progreso: dict[str, object] | None = None,
+    ) -> SyncJobModel:
+        """Crea un job persistido para ejecución larga."""
+
+        job = SyncJobModel(
+            tipo=tipo,
+            estado="PENDIENTE",
+            sku=sku,
+            id_sistema_gbp=id_sistema_gbp,
+            prioridad=prioridad,
+            error_mensaje=json.dumps(progreso or {}, ensure_ascii=False),
+        )
+        self.db.add(job)
+        self.db.commit()
+        self.db.refresh(job)
+        return job
+
+    def obtener(self, job_id: int) -> SyncJobModel | None:
+        """Obtiene un job por id."""
+
+        return self.db.get(SyncJobModel, job_id)
+
+    def actualizar(
+        self,
+        job_id: int,
+        *,
+        estado: str | None = None,
+        progreso: dict[str, object] | None = None,
+        error_codigo: str | None = None,
+        error_mensaje: str | None = None,
+        iniciar: bool = False,
+        finalizar: bool = False,
+    ) -> SyncJobModel | None:
+        """Actualiza estado y progreso del job."""
+
+        job = self.obtener(job_id)
+        if job is None:
+            return None
+        if estado is not None:
+            job.estado = estado
+        if iniciar:
+            job.started_at = datetime.now(UTC)
+        if finalizar:
+            job.finished_at = datetime.now(UTC)
+        if error_codigo is not None:
+            job.error_codigo = error_codigo
+        if progreso is not None:
+            job.error_mensaje = json.dumps(progreso, ensure_ascii=False)
+        elif error_mensaje is not None:
+            job.error_mensaje = error_mensaje
+        self.db.commit()
+        self.db.refresh(job)
+        return job
+
+    def serializar(self, job: SyncJobModel | None) -> dict[str, object] | None:
+        """Serializa un job para API/panel."""
+
+        if job is None:
+            return None
+        progreso: object = {}
+        if job.error_mensaje:
+            try:
+                progreso = json.loads(job.error_mensaje)
+            except json.JSONDecodeError:
+                progreso = {"mensaje": job.error_mensaje}
+        return {
+            "id": job.id,
+            "tipo": job.tipo,
+            "estado": job.estado,
+            "sku": job.sku,
+            "id_sistema_gbp": job.id_sistema_gbp,
+            "prioridad": job.prioridad,
+            "intentos": job.intentos,
+            "error_codigo": job.error_codigo,
+            "progreso": progreso,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "started_at": job.started_at.isoformat() if job.started_at else None,
+            "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+        }
+
+    def obtener_serializado(self, job_id: int) -> dict[str, object] | None:
+        """Obtiene y serializa un job."""
+
+        return self.serializar(self.obtener(job_id))
 
     def contar_por_estado(self) -> dict[str, int]:
         """Cuenta jobs por estado."""

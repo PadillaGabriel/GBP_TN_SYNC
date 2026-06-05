@@ -1,15 +1,122 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.application.jobs.bulk_jobs import ejecutar_job_auditar_todo, ejecutar_job_importar_todo
 from app.application.services.gbp_audit_service import GBPAuditService
 from app.application.services.tienda_nube_import_service import TiendaNubeImportService
 from app.dependencies import get_db_session
+from app.infrastructure.persistence.repositories import SyncJobRepository
 from app.settings import get_settings
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 logger = logging.getLogger(__name__)
+
+
+@router.post("/jobs/audit-all")
+async def iniciar_job_auditar_todo(
+    background_tasks: BackgroundTasks,
+    batch_limit: int = Query(default=200, ge=1, le=1000),
+    concurrency: int = Query(default=3, ge=1, le=10),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Inicia auditoría total de candidatos GBP pendientes en segundo plano."""
+
+    job = SyncJobRepository(db).crear(
+        tipo="AUDITAR_TODO_GBP",
+        progreso={
+            "mensaje": "Job creado. Esperando inicio de auditoría total.",
+            "batch_limit": batch_limit,
+            "concurrency": concurrency,
+            "porcentaje": 0,
+        },
+    )
+    background_tasks.add_task(
+        ejecutar_job_auditar_todo,
+        job_id=job.id,
+        batch_limit=batch_limit,
+        concurrency=concurrency,
+    )
+    return {
+        "ok": True,
+        "job_id": job.id,
+        "tipo": job.tipo,
+        "estado": job.estado,
+        "status_url": f"/sync/jobs/{job.id}",
+    }
+
+
+@router.post("/jobs/import-all")
+async def iniciar_job_importar_todo(
+    background_tasks: BackgroundTasks,
+    batch_limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Inicia importación total de publicables pendientes en segundo plano."""
+
+    settings = get_settings()
+    job = SyncJobRepository(db).crear(
+        tipo="IMPORTAR_TODO_TN",
+        progreso={
+            "mensaje": "Job creado. Esperando inicio de importación total.",
+            "batch_limit": batch_limit,
+            "dry_run": settings.dry_run,
+            "porcentaje": 0,
+        },
+    )
+    background_tasks.add_task(
+        ejecutar_job_importar_todo,
+        job_id=job.id,
+        batch_limit=batch_limit,
+    )
+    return {
+        "ok": True,
+        "job_id": job.id,
+        "tipo": job.tipo,
+        "estado": job.estado,
+        "dry_run": settings.dry_run,
+        "status_url": f"/sync/jobs/{job.id}",
+    }
+
+
+@router.get("/jobs/{job_id}")
+def obtener_job(job_id: int, db: Session = Depends(get_db_session)) -> dict[str, object]:
+    """Consulta estado y progreso de un job largo."""
+
+    data = SyncJobRepository(db).obtener_serializado(job_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Job no encontrado")
+    return {"ok": True, "job": data}
+
+
+@router.post("/import/tienda-nube-sku")
+async def importar_sku_directo_tienda_nube(
+    sku: str = Query(..., min_length=1),
+    confirm: bool = Query(default=True),
+    forzar: bool = Query(default=False),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Busca un SKU en GBP, lo valida, lo persiste y lo importa/actualiza en Tienda Nube."""
+
+    settings = get_settings()
+    try:
+        service = TiendaNubeImportService(settings=settings, db=db)
+        return await service.importar_producto_manual_tienda_nube(
+            sku=sku,
+            confirm=confirm,
+            forzar=forzar,
+        )
+    except Exception as exc:  # noqa: BLE001 - diagnóstico operativo.
+        logger.exception("TN_IMPORT_SKU_DIRECT_ENDPOINT_ERROR", extra={"sku": sku})
+        return {
+            "ok": False,
+            "dry_run": settings.dry_run,
+            "confirm": confirm,
+            "forzar": forzar,
+            "sku": sku,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
 
 @router.post("/stock/run")

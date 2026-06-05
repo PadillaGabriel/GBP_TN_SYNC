@@ -2,11 +2,12 @@ import logging
 from html import escape
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
+from app.application.jobs.bulk_jobs import ejecutar_job_auditar_todo, ejecutar_job_importar_todo
 from app.application.services.gbp_audit_service import GBPAuditService
 from app.application.services.tienda_nube_import_service import TiendaNubeImportService
 from app.dependencies import get_db_session
@@ -472,6 +473,107 @@ def panel_decisiones(
     )
 
 
+
+
+
+
+@router.post("/panel/jobs/auditar-todo")
+async def panel_iniciar_job_auditar_todo(
+    background_tasks: BackgroundTasks,
+    batch_limit: int = Query(default=200, ge=1, le=1000),
+    concurrency: int = Query(default=3, ge=1, le=10),
+    db: Session = Depends(get_db_session),
+) -> JSONResponse:
+    """Inicia auditoría total desde el panel y devuelve job_id para popup de progreso."""
+
+    job = SyncJobRepository(db).crear(
+        tipo="AUDITAR_TODO_GBP",
+        progreso={
+            "mensaje": "Job creado. Esperando inicio de auditoría total.",
+            "batch_limit": batch_limit,
+            "concurrency": concurrency,
+            "porcentaje": 0,
+        },
+    )
+    background_tasks.add_task(
+        ejecutar_job_auditar_todo,
+        job_id=job.id,
+        batch_limit=batch_limit,
+        concurrency=concurrency,
+    )
+    return JSONResponse({
+        "ok": True,
+        "job_id": job.id,
+        "tipo": job.tipo,
+        "status_url": f"/admin/panel/jobs/{job.id}",
+    })
+
+
+@router.post("/panel/jobs/importar-todo")
+async def panel_iniciar_job_importar_todo(
+    background_tasks: BackgroundTasks,
+    batch_limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db_session),
+) -> JSONResponse:
+    """Inicia importación total desde el panel y devuelve job_id para popup de progreso."""
+
+    settings = get_settings()
+    job = SyncJobRepository(db).crear(
+        tipo="IMPORTAR_TODO_TN",
+        progreso={
+            "mensaje": "Job creado. Esperando inicio de importación total.",
+            "batch_limit": batch_limit,
+            "dry_run": settings.dry_run,
+            "porcentaje": 0,
+        },
+    )
+    background_tasks.add_task(
+        ejecutar_job_importar_todo,
+        job_id=job.id,
+        batch_limit=batch_limit,
+    )
+    return JSONResponse({
+        "ok": True,
+        "job_id": job.id,
+        "tipo": job.tipo,
+        "dry_run": settings.dry_run,
+        "status_url": f"/admin/panel/jobs/{job.id}",
+    })
+
+
+@router.get("/panel/jobs/{job_id}")
+def panel_obtener_job(job_id: int, db: Session = Depends(get_db_session)) -> JSONResponse:
+    """Devuelve progreso de job largo para el panel."""
+
+    data = SyncJobRepository(db).obtener_serializado(job_id)
+    if data is None:
+        return JSONResponse({"ok": False, "error": "Job no encontrado"}, status_code=404)
+    return JSONResponse({"ok": True, "job": data})
+
+
+@router.post("/panel/importar-sku")
+async def panel_importar_sku_directo(
+    sku: str = Form(..., min_length=1),
+    forzar: bool = Form(default=False),
+    estado: str = Query(default="importado"),
+    q: str | None = Query(default=None),
+    db: Session = Depends(get_db_session),
+) -> RedirectResponse:
+    """Busca un SKU en GBP y lo importa/actualiza en Tienda Nube desde el panel."""
+
+    settings = get_settings()
+    service = TiendaNubeImportService(settings=settings, db=db)
+    result = await service.importar_producto_manual_tienda_nube(
+        sku=sku.strip(),
+        confirm=True,
+        forzar=forzar,
+    )
+    mensaje = (
+        f"SKU {sku}: {result.get('estado')}. "
+        f"Acción: {result.get('accion', 'consulta/importación SKU')}. "
+        f"Decisión: {result.get('decision', '-')}."
+    )
+    return _panel_redirect(estado, mensaje, q=q)
 
 
 @router.post("/panel/auditar-proximos")
