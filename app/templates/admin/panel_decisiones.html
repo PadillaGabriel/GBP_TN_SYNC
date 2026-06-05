@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GBP TN Sync | Panel de decisiones</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/admin/panel.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">GBP → Tienda Nube</p>
+      <h1>Panel de decisiones</h1>
+      <p class="subtitle">Productos auditados, bloqueados, importados y acciones manuales.</p>
+    </div>
+    <div class="topbar-actions">
+      <a class="ghost-link" href="/admin/dashboard" target="_blank" rel="noopener">JSON dashboard</a>
+      <a class="ghost-link" href="/health" target="_blank" rel="noopener">Health</a>
+    </div>
+  </header>
+
+  <main class="layout">
+    {% if mensaje %}
+      <section class="notice">{{ mensaje }}</section>
+    {% endif %}
+
+    {% if not settings.dry_run %}
+      <section class="risk-banner">
+        <strong>DRY_RUN=false.</strong>
+        Las acciones Ocultar, Eliminar TN e Importar forzado pueden escribir en Tienda Nube.
+      </section>
+    {% endif %}
+
+    <section class="summary-grid" aria-label="Resumen operativo">
+      <article class="summary-card"><span>Ambiente</span><strong>{{ dashboard.app_env }}</strong></article>
+      <article class="summary-card {% if settings.dry_run %}safe{% else %}danger{% endif %}"><span>DRY_RUN</span><strong>{{ settings.dry_run }}</strong></article>
+      <article class="summary-card"><span>Auditados</span><strong>{{ dashboard.productos_auditados }}</strong></article>
+      <article class="summary-card"><span>Mapeados TN</span><strong>{{ dashboard.productos_mapeados_tienda_nube }}</strong></article>
+      <article class="summary-card"><span>Publicables</span><strong>{{ dashboard.publicables_total }}</strong></article>
+      <article class="summary-card"><span>Pendientes</span><strong>{{ dashboard.publicables_pendientes_importar }}</strong></article>
+      <article class="summary-card"><span>Bloqueados</span><strong>{{ dashboard.bloqueados_total }}</strong></article>
+      <article class="summary-card"><span>Bloq. importados</span><strong>{{ dashboard.bloqueados_importados_tienda_nube }}</strong></article>
+    </section>
+
+    <section class="toolbar" aria-label="Filtros y búsqueda">
+      <nav class="tabs">
+        {% for key, label in estados %}
+          <a class="tab {% if key == estado %}active{% endif %}" href="/admin/panel/decisiones?estado={{ key }}&limit={{ limit }}{% if q %}&q={{ q | urlencode }}{% endif %}">{{ label }}</a>
+        {% endfor %}
+      </nav>
+
+      <form class="search-form" method="get" action="/admin/panel/decisiones">
+        <input type="hidden" name="estado" value="{{ estado }}">
+        <input type="hidden" name="limit" value="{{ limit }}">
+        <label for="q">Buscar</label>
+        <input id="q" name="q" value="{{ q }}" placeholder="SKU, título, categoría, ID TN">
+        <button type="submit">Buscar</button>
+        {% if q %}<a class="clear-link" href="/admin/panel/decisiones?estado={{ estado }}&limit={{ limit }}">Limpiar</a>{% endif %}
+      </form>
+    </section>
+
+    <section class="table-card">
+      <div class="table-meta">
+        <div>
+          <strong>{{ items | length }}</strong> registros visibles
+          <span>Estado: {{ estado }}</span>
+          {% if q %}<span>Búsqueda: {{ q }}</span>{% endif %}
+        </div>
+        <div>
+          Offset {{ offset }} · límite {{ limit }}
+        </div>
+      </div>
+
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Producto</th>
+              <th>Decisión</th>
+              <th>Stock TN</th>
+              <th>Precio</th>
+              <th>Largo desc.</th>
+              <th>Importado</th>
+              <th>Estado TN</th>
+              <th>ID TN</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+              {% set decision = item.decision or 'SIN_VALIDAR' %}
+              {% set imported = item.ya_importado_tienda_nube %}
+              <tr class="{% if item.requiere_revision %}needs-review{% endif %}">
+                <td class="sku-cell">
+                  <strong>{{ item.sku }}</strong>
+                  <small>ID GBP: {{ item.id_sistema_gbp or '-' }}</small>
+                </td>
+                <td class="product-cell">
+                  <strong>{{ item.titulo or '-' }}</strong>
+                  <small>{{ item.categoria or '-' }} / {{ item.subcategoria or '-' }} / {{ item.marca or '-' }}</small>
+                  {% if item.codigo_proveedor %}<small>Cod. proveedor: {{ item.codigo_proveedor }}</small>{% endif %}
+                </td>
+                <td>
+                  <span class="decision-badge {% if decision == 'PUBLICABLE_AUTOMATICO' %}ok{% elif decision == 'SIN_VALIDAR' %}muted{% else %}warn{% endif %}">{{ decision }}</span>
+                  {% if item.motivos_bloqueo %}
+                    <small class="reason">{{ item.motivos_bloqueo | join(', ') }}</small>
+                  {% endif %}
+                </td>
+                <td class="number-cell {% if item.stock_publicable_tn is not none and item.stock_publicable_tn <= 0 %}bad-number{% endif %}">{{ item.stock_publicable_tn if item.stock_publicable_tn is not none else '-' }}</td>
+                <td class="number-cell">{{ item.precio_importado if item.precio_importado is not none else '-' }}</td>
+                <td class="number-cell">{{ item.descripcion_largo }}</td>
+                <td>
+                  {% if imported %}<span class="status-dot yes">Sí</span>{% else %}<span class="status-dot no">No</span>{% endif %}
+                </td>
+                <td>{{ item.estado_publicacion or '-' }}</td>
+                <td>{{ item.tn_product_id or '-' }}</td>
+                <td>
+                  <div class="action-stack">
+                    {% if imported %}
+                      <form method="post" action="/admin/panel/decisiones/{{ item.sku }}/ocultar-tn?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Ocultar publicación" data-confirm-text="Se va a despublicar el SKU {{ item.sku }} en Tienda Nube. El registro local se conserva." data-confirm-kind="secondary">
+                        <button class="btn secondary" type="submit">Ocultar</button>
+                      </form>
+                      <form method="post" action="/admin/panel/decisiones/{{ item.sku }}/eliminar-tn?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Eliminar publicación en Tienda Nube" data-confirm-text="Se va a eliminar el SKU {{ item.sku }} en Tienda Nube. No se borra la auditoría local. Acción destructiva." data-confirm-kind="danger">
+                        <button class="btn danger" type="submit">Eliminar TN</button>
+                      </form>
+                    {% endif %}
+                    {% if (not imported) or decision != 'PUBLICABLE_AUTOMATICO' %}
+                      <form method="post" action="/admin/panel/decisiones/{{ item.sku }}/importar-manual?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Importar manualmente" data-confirm-text="Se va a importar o actualizar el SKU {{ item.sku }} forzando la regla de validación." data-confirm-kind="primary">
+                        <button class="btn primary" type="submit">Importar forzado</button>
+                      </form>
+                    {% endif %}
+                  </div>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="10" class="empty-state">Sin productos para este filtro.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <nav class="pager" aria-label="Paginación">
+      <a class="pager-link" href="/admin/panel/decisiones?estado={{ estado }}&limit={{ limit }}&offset={{ prev_offset }}{% if q %}&q={{ q | urlencode }}{% endif %}">Anterior</a>
+      <span>Offset {{ offset }}</span>
+      <a class="pager-link" href="/admin/panel/decisiones?estado={{ estado }}&limit={{ limit }}&offset={{ next_offset }}{% if q %}&q={{ q | urlencode }}{% endif %}">Siguiente</a>
+    </nav>
+  </main>
+
+  <dialog id="confirm-modal" class="confirm-modal">
+    <form method="dialog" class="modal-box">
+      <h2 id="confirm-title">Confirmar acción</h2>
+      <p id="confirm-text"></p>
+      <div class="modal-actions">
+        <button class="btn secondary" value="cancel">Cancelar</button>
+        <button id="confirm-submit" class="btn primary" value="confirm">Confirmar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="{{ url_for('static', path='/admin/panel.js') }}"></script>
+</body>
+</html>

@@ -1,57 +1,65 @@
-# Panel visual de decisiones administrativas
+# Panel visual admin
 
-## URL principal
+URL principal:
 
 ```text
 /admin/panel
 ```
 
-Redirige a:
+Vista de decisiones:
 
 ```text
 /admin/panel/decisiones?estado=requiere_revision&limit=100
 ```
 
-## Vistas disponibles
+## Función
 
-- `requiere_revision`: productos importados que hoy requieren una decisión.
-- `bloqueado_importado`: productos ya mapeados en Tienda Nube pero actualmente bloqueados por reglas de validación.
-- `publicable_pendiente`: productos publicables todavía no importados.
-- `importado`: productos con mapeo local hacia Tienda Nube.
-- `bloqueado`: productos bloqueados por cualquier motivo.
-- `todos`: todos los productos auditados.
-- `NO_PUBLICAR_STOCK_SIN_DISPONIBLE`: productos bloqueados por stock 0 o menor.
-- `NO_PUBLICAR_SIN_DESCRIPCION_WEB`: productos bloqueados por falta de descripción web.
-- `PUBLICABLE_AUTOMATICO`: productos publicables.
+Permite revisar visualmente productos auditados, bloqueados, importados y pendientes, con acciones manuales sobre Tienda Nube.
 
-## Acciones visuales
+## Componentes
 
-Desde cada fila el panel puede ejecutar:
+- `app/templates/admin/panel_decisiones.html`: estructura HTML del panel.
+- `app/static/admin/panel.css`: diseño visual del panel.
+- `app/static/admin/panel.js`: confirmaciones para acciones manuales.
+- `app/api/routes_admin.py`: rutas HTML y endpoints JSON existentes.
 
-- Ocultar en Tienda Nube.
-- Eliminar en Tienda Nube.
-- Importar manualmente forzado.
+## Filtros
 
-Las acciones usan `confirm=True` internamente porque el formulario visual ya representa una decisión explícita del operador. Si `DRY_RUN=true`, no se escribe en Tienda Nube. Si `DRY_RUN=false`, las acciones escriben realmente.
+- `requiere_revision`
+- `bloqueado_importado`
+- `publicable_pendiente`
+- `importado`
+- `bloqueado`
+- `todos`
+- `NO_PUBLICAR_STOCK_SIN_DISPONIBLE`
+- `NO_PUBLICAR_SIN_DESCRIPCION_WEB`
+- `PUBLICABLE_AUTOMATICO`
 
-## Endpoints HTML agregados
+## Búsqueda
+
+El parámetro `q` busca por:
+
+- SKU
+- título
+- categoría
+- subcategoría
+- marca
+- código proveedor
+- ID de producto en Tienda Nube
+
+Ejemplo:
 
 ```text
-GET  /admin/panel
-GET  /admin/panel/decisiones
-POST /admin/panel/decisiones/{sku}/ocultar-tn
-POST /admin/panel/decisiones/{sku}/eliminar-tn
-POST /admin/panel/decisiones/{sku}/importar-manual
+/admin/panel/decisiones?estado=todos&q=1689&limit=100
 ```
 
-## Endpoints JSON conservados
+## Acciones
 
-Los endpoints JSON previos siguen disponibles:
+Las acciones del panel usan confirmación visual antes de ejecutar:
 
-```text
-GET  /admin/dashboard
-GET  /admin/decisiones/productos
-POST /admin/decisiones/productos/{sku}/ocultar-tn?confirm=true
-POST /admin/decisiones/productos/{sku}/eliminar-tn?confirm=true
-POST /sync/import/tienda-nube-manual?sku={sku}&forzar=true&confirm=true
-```
+- Ocultar: despublica el producto en Tienda Nube y conserva el mapeo local.
+- Eliminar TN: elimina el producto en Tienda Nube y conserva auditoría local.
+- Importar forzado: importa o actualiza manualmente aunque el producto esté bloqueado.
+
+Con `DRY_RUN=true`, no se escribe en Tienda Nube.
+Con `DRY_RUN=false`, las acciones confirmadas pueden escribir en Tienda Nube.

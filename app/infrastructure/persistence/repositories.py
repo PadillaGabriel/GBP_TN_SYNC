@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.application.services.producto_validation_service import ResultadoValidacionProducto
@@ -357,6 +357,7 @@ class ProductoRepository:
         estado: str = "requiere_revision",
         limit: int = 100,
         offset: int = 0,
+        q: str | None = None,
     ) -> list[dict[str, object]]:
         """Lista productos para gestionar decisiones operativas desde el panel."""
 
@@ -398,6 +399,21 @@ class ProductoRepository:
             )
         elif estado != "todos":
             query = query.where(ProductoValidacionModel.decision == estado)
+
+        clean_q = q.strip() if q else ""
+        if clean_q:
+            term = f"%{clean_q}%"
+            query = query.where(
+                or_(
+                    ProductoFuenteModel.sku.ilike(term),
+                    ProductoFuenteModel.titulo.ilike(term),
+                    ProductoFuenteModel.categoria_nombre.ilike(term),
+                    ProductoFuenteModel.subcategoria_nombre.ilike(term),
+                    ProductoFuenteModel.marca_nombre.ilike(term),
+                    ProductoFuenteModel.codigo_proveedor.ilike(term),
+                    ProductoTiendaNubeModel.tn_product_id.ilike(term),
+                )
+            )
 
         rows = self.db.execute(
             query.order_by(ProductoFuenteModel.updated_at.desc()).offset(offset).limit(limit)

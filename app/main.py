@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes_admin import router as admin_router
 from app.api.routes_health import router as health_router
@@ -32,6 +33,7 @@ def create_app() -> FastAPI:
         debug=settings.app_debug,
         lifespan=lifespan,
     )
+    app.mount("/static", StaticFiles(directory="app/static"), name="static")
     app.include_router(health_router)
     app.include_router(sync_router)
     app.include_router(admin_router)

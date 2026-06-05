@@ -2,8 +2,9 @@ import logging
 from html import escape
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.application.services.tienda_nube_import_service import TiendaNubeImportService
@@ -17,6 +18,7 @@ from app.infrastructure.persistence.repositories import (
 from app.settings import get_settings
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+templates = Jinja2Templates(directory="app/templates")
 logger = logging.getLogger(__name__)
 
 
@@ -107,6 +109,7 @@ def listar_decisiones_productos(
     ),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    q: str | None = Query(default=None),
     db: Session = Depends(get_db_session),
 ) -> dict[str, object]:
     """Panel operativo para gestionar decisiones de importación/publicación."""
@@ -116,7 +119,8 @@ def listar_decisiones_productos(
         "estado": estado,
         "limit": limit,
         "offset": offset,
-        "items": productos.listar_panel_decisiones(estado=estado, limit=limit, offset=offset),
+        "q": q,
+        "items": productos.listar_panel_decisiones(estado=estado, limit=limit, offset=offset, q=q),
     }
 
 
@@ -182,8 +186,11 @@ def _safe(value: object) -> str:
     return escape(str(value), quote=True)
 
 
-def _panel_redirect(estado: str, mensaje: str) -> RedirectResponse:
-    params = urlencode({"estado": estado, "mensaje": mensaje})
+def _panel_redirect(estado: str, mensaje: str, q: str | None = None) -> RedirectResponse:
+    payload = {"estado": estado, "mensaje": mensaje}
+    if q:
+        payload["q"] = q
+    params = urlencode(payload)
     return RedirectResponse(url=f"/admin/panel/decisiones?{params}", status_code=303)
 
 
@@ -362,9 +369,11 @@ def panel_home() -> RedirectResponse:
 
 @router.get("/panel/decisiones", response_class=HTMLResponse)
 def panel_decisiones(
+    request: Request,
     estado: str = Query(default="requiere_revision"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    q: str | None = Query(default=None),
     mensaje: str | None = Query(default=None),
     db: Session = Depends(get_db_session),
 ) -> HTMLResponse:
@@ -392,21 +401,44 @@ def panel_decisiones(
         "jobs": jobs.contar_por_estado(),
         "ultimo_evento": auditoria.obtener_ultimo_evento(),
     }
-    html = _render_panel_html(
-        dashboard_data=dashboard_data,
-        items=productos.listar_panel_decisiones(estado=estado, limit=limit, offset=offset),
-        estado=estado,
-        limit=limit,
-        offset=offset,
-        mensaje=mensaje,
+    estados = [
+        ("requiere_revision", "Requiere revisión"),
+        ("bloqueado_importado", "Bloqueados importados"),
+        ("publicable_pendiente", "Publicables pendientes"),
+        ("importado", "Importados"),
+        ("bloqueado", "Bloqueados"),
+        ("todos", "Todos"),
+        ("NO_PUBLICAR_STOCK_SIN_DISPONIBLE", "Sin stock disponible"),
+        ("NO_PUBLICAR_SIN_DESCRIPCION_WEB", "Sin descripción web"),
+        ("PUBLICABLE_AUTOMATICO", "Publicables"),
+    ]
+    items = productos.listar_panel_decisiones(estado=estado, limit=limit, offset=offset, q=q)
+    prev_offset = max(offset - limit, 0)
+    next_offset = offset + limit
+    return templates.TemplateResponse(
+        "admin/panel_decisiones.html",
+        {
+            "request": request,
+            "dashboard": dashboard_data,
+            "items": items,
+            "estados": estados,
+            "estado": estado,
+            "limit": limit,
+            "offset": offset,
+            "prev_offset": prev_offset,
+            "next_offset": next_offset,
+            "q": q or "",
+            "mensaje": mensaje,
+            "settings": settings,
+        },
     )
-    return HTMLResponse(content=html)
 
 
 @router.post("/panel/decisiones/{sku}/ocultar-tn")
 async def panel_ocultar_producto_tienda_nube(
     sku: str,
     estado: str = Query(default="requiere_revision"),
+    q: str | None = Query(default=None),
     db: Session = Depends(get_db_session),
 ) -> RedirectResponse:
     """Acción visual: oculta/despublica en Tienda Nube con confirmación implícita del formulario."""
@@ -415,13 +447,14 @@ async def panel_ocultar_producto_tienda_nube(
     service = TiendaNubeImportService(settings=settings, db=db)
     resultado = await service.ocultar_producto_tienda_nube(sku=sku, confirm=True)
     mensaje = f"SKU {sku}: {resultado.get('estado')} - {resultado.get('accion', 'ocultar_tienda_nube')}"
-    return _panel_redirect(estado, mensaje)
+    return _panel_redirect(estado, mensaje, q)
 
 
 @router.post("/panel/decisiones/{sku}/eliminar-tn")
 async def panel_eliminar_producto_tienda_nube(
     sku: str,
     estado: str = Query(default="requiere_revision"),
+    q: str | None = Query(default=None),
     db: Session = Depends(get_db_session),
 ) -> RedirectResponse:
     """Acción visual: elimina en Tienda Nube con confirmación implícita del formulario."""
@@ -430,13 +463,14 @@ async def panel_eliminar_producto_tienda_nube(
     service = TiendaNubeImportService(settings=settings, db=db)
     resultado = await service.eliminar_producto_tienda_nube(sku=sku, confirm=True)
     mensaje = f"SKU {sku}: {resultado.get('estado')} - {resultado.get('accion', 'eliminar_tienda_nube')}"
-    return _panel_redirect(estado, mensaje)
+    return _panel_redirect(estado, mensaje, q)
 
 
 @router.post("/panel/decisiones/{sku}/importar-manual")
 async def panel_importar_producto_manual(
     sku: str,
     estado: str = Query(default="requiere_revision"),
+    q: str | None = Query(default=None),
     db: Session = Depends(get_db_session),
 ) -> RedirectResponse:
     """Acción visual: importa o actualiza manualmente un producto, forzando si está bloqueado."""
@@ -449,4 +483,4 @@ async def panel_importar_producto_manual(
         forzar=True,
     )
     mensaje = f"SKU {sku}: {resultado.get('estado')} - {resultado.get('accion', 'importar_manual_forzada')}"
-    return _panel_redirect(estado, mensaje)
+    return _panel_redirect(estado, mensaje, q)
