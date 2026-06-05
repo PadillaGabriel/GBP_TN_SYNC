@@ -84,6 +84,7 @@ class TiendaNubeImportService:
             try:
                 producto = await self._obtener_producto_publicable(token=token, item_id=item_id)
                 validacion = self.validation_service.validar_publicacion(producto)
+                self._persistir_producto_validado(producto, validacion)
                 if not validacion.publicable:
                     resumen["bloqueados"] += 1
                     resumen["resultados"].append(
@@ -112,6 +113,8 @@ class TiendaNubeImportService:
                             "stock": producto.stock.cantidad if producto.stock else None,
                             "imagenes": len(producto.imagenes),
                             "payload_preview": payload,
+                            "categoria": producto.categoria_nombre,
+                            "subcategoria": producto.subcategoria_nombre,
                         }
                     )
                     continue
@@ -157,6 +160,8 @@ class TiendaNubeImportService:
                         "precio": str(producto.precio_importado.monto) if producto.precio_importado else None,
                         "stock": producto.stock.cantidad if producto.stock else None,
                         "imagenes": len(producto.imagenes),
+                        "categoria": producto.categoria_nombre,
+                        "subcategoria": producto.subcategoria_nombre,
                     }
                 )
             except Exception as exc:  # noqa: BLE001 - una fila no debe cortar el lote.
@@ -176,6 +181,132 @@ class TiendaNubeImportService:
         resumen["ok"] = resumen["errores"] == 0
         self._registrar_resumen(resumen)
         return normalizar_objeto_gbp(resumen)
+
+
+    async def importar_producto_manual_tienda_nube(
+        self,
+        *,
+        sku: str | None = None,
+        item_id: int | None = None,
+        confirm: bool = False,
+        forzar: bool = False,
+    ) -> dict[str, Any]:
+        """Importa o actualiza un producto puntual bajo control manual.
+
+        - Si DRY_RUN=true, no escribe en Tienda Nube.
+        - Si confirm=False, no escribe en Tienda Nube.
+        - Si el producto queda bloqueado, solo escribe si forzar=True.
+        """
+
+        if not sku and item_id is None:
+            raise ValueError("Debe informar sku o item_id")
+
+        started = time.perf_counter()
+        ejecutar_tn = bool(confirm and not self.settings.dry_run)
+        token = await self.gbp_client.autenticar()
+        resolved_item_id: str | int | None = item_id
+        if resolved_item_id is None and sku:
+            resolved_item_id = await self.gbp_client.obtener_item_id_por_codigo(token, sku)
+        if resolved_item_id in (None, ""):
+            raise ValueError(f"GBP no devolvio item_id para sku={sku}")
+
+        producto = await self._obtener_producto_publicable(token=token, item_id=str(resolved_item_id))
+        validacion = self.validation_service.validar_publicacion(producto)
+        self._persistir_producto_validado(producto, validacion)
+
+        payload = self.payload_builder.build_product_payload(producto)
+        bloqueado = not validacion.publicable
+        if bloqueado and not forzar:
+            return normalizar_objeto_gbp(
+                {
+                    "ok": True,
+                    "dry_run": self.settings.dry_run,
+                    "confirm": confirm,
+                    "forzar": forzar,
+                    "ejecuta_tienda_nube": False,
+                    "sku": producto.sku,
+                    "id_sistema_gbp": producto.id_sistema_gbp,
+                    "titulo": producto.titulo,
+                    "estado": "BLOQUEADO",
+                    "decision": validacion.decision,
+                    "motivos": validacion.motivos_bloqueo,
+                    "precio": str(producto.precio_importado.monto) if producto.precio_importado else None,
+                    "stock": producto.stock.cantidad if producto.stock else None,
+                    "payload_preview": payload,
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                }
+            )
+
+        if not ejecutar_tn:
+            return normalizar_objeto_gbp(
+                {
+                    "ok": True,
+                    "dry_run": self.settings.dry_run,
+                    "confirm": confirm,
+                    "forzar": forzar,
+                    "ejecuta_tienda_nube": False,
+                    "sku": producto.sku,
+                    "id_sistema_gbp": producto.id_sistema_gbp,
+                    "titulo": producto.titulo,
+                    "estado": "DRY_RUN" if self.settings.dry_run else "SIMULADO_SIN_CONFIRMACION",
+                    "decision": validacion.decision,
+                    "motivos": validacion.motivos_bloqueo,
+                    "accion": "crear_o_actualizar_producto_manual",
+                    "precio": str(producto.precio_importado.monto) if producto.precio_importado else None,
+                    "stock": producto.stock.cantidad if producto.stock else None,
+                    "payload_preview": payload,
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                }
+            )
+
+        tn_adapter = self._crear_tienda_nube_adapter()
+        resultado = await tn_adapter.crear_o_actualizar_producto(producto)
+        tn_product = resultado.detalles.get("tn_product", {}) if resultado.detalles else {}
+        tn_product_id = self._extraer_tn_product_id(tn_product)
+        tn_variant_id = self._extraer_tn_variant_id(tn_product)
+        if tn_product_id:
+            producto_model = self.productos_repo.obtener_por_sku(producto.sku)
+            if producto_model is not None:
+                self.productos_repo.guardar_mapeo_tienda_nube(
+                    producto_fuente_id=producto_model.id,
+                    sku=producto.sku,
+                    tn_product_id=tn_product_id,
+                    tn_variant_id=tn_variant_id,
+                    estado_publicacion="activo_manual" if bloqueado else "activo",
+                )
+
+        self.audit_repo.registrar(
+            sku=producto.sku,
+            accion="TN_IMPORT_PRODUCT_MANUAL",
+            estado="OK",
+            mensaje=(
+                f"accion={resultado.accion} tn_product_id={tn_product_id or ''} "
+                f"forzar={forzar} decision={validacion.decision}"
+            ),
+            metodo_gbp="TiendaNubeAdapter.crear_o_actualizar_producto",
+            duracion_ms=int((time.perf_counter() - started) * 1000),
+        )
+        return normalizar_objeto_gbp(
+            {
+                "ok": True,
+                "dry_run": self.settings.dry_run,
+                "confirm": confirm,
+                "forzar": forzar,
+                "ejecuta_tienda_nube": True,
+                "sku": producto.sku,
+                "id_sistema_gbp": producto.id_sistema_gbp,
+                "titulo": producto.titulo,
+                "estado": "OK",
+                "decision": validacion.decision,
+                "motivos": validacion.motivos_bloqueo,
+                "accion": resultado.accion,
+                "tn_product_id": tn_product_id,
+                "tn_variant_id": tn_variant_id,
+                "precio": str(producto.precio_importado.monto) if producto.precio_importado else None,
+                "stock": producto.stock.cantidad if producto.stock else None,
+                "duration_ms": int((time.perf_counter() - started) * 1000),
+            }
+        )
 
     async def _obtener_producto_publicable(self, *, token: str, item_id: str):
         detalle = await self.gbp_client.obtener_producto_por_id(token, int(item_id))
@@ -204,13 +335,26 @@ class TiendaNubeImportService:
             item_id=int(item_id),
             storage_id=-1,
         )
-        producto.stock = self.normalizer.normalizar_stock_desde_filas(
-            stock_rows,
-            sku=producto.sku,
-            id_sistema_gbp=producto.id_sistema_gbp,
-            ecommerce_storage_ids=self.settings.ecommerce_storage_id_list,
-        )
+        try:
+            producto.stock = self.normalizer.normalizar_stock_desde_filas(
+                stock_rows,
+                sku=producto.sku,
+                id_sistema_gbp=producto.id_sistema_gbp,
+                ecommerce_storage_ids=self.settings.ecommerce_storage_id_list,
+            )
+        except Exception:  # noqa: BLE001 - validacion debe marcar stock no consultable.
+            logger.exception("tn_import_stock_normalization_failed", extra={"item_id": item_id})
+            producto.stock = None
         return producto
+
+
+    def _persistir_producto_validado(self, producto, validacion) -> None:
+        """Persiste producto, validacion y stock sin duplicar lógica."""
+
+        producto_model = self.productos_repo.guardar_producto(producto)
+        self.productos_repo.guardar_validacion(producto_model.id, producto, validacion)
+        if producto.stock is not None:
+            self.productos_repo.guardar_stock(producto_model.id, producto.stock)
 
     def _crear_tienda_nube_adapter(self) -> TiendaNubeAdapter:
         client = TiendaNubeClient(

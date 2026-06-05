@@ -7,7 +7,12 @@ from app.domain.models.producto import Producto
 class TiendaNubePayloadBuilder:
     """Construye payloads de Tienda Nube desde modelos internos."""
 
-    def build_product_payload(self, producto: Producto) -> dict[str, Any]:
+    def build_product_payload(
+        self,
+        producto: Producto,
+        *,
+        category_ids: list[int] | None = None,
+    ) -> dict[str, Any]:
         """Payload para crear o actualizar producto completo."""
 
         payload: dict[str, Any] = {
@@ -15,6 +20,9 @@ class TiendaNubePayloadBuilder:
             "description": {"es": producto.descripcion_web or ""},
             "variants": [self._build_main_variant(producto)],
         }
+
+        if category_ids:
+            payload["categories"] = category_ids
 
         if producto.imagenes:
             payload["images"] = [
@@ -52,5 +60,7 @@ class TiendaNubePayloadBuilder:
             "sku": producto.sku,
             "price": precio,
             "stock": stock,
-            "barcode": producto.codigo_universal,
+            # Regla de negocio Silmar: el codigo de proveedor GBP se publica
+            # como codigo universal/barcode en Tienda Nube.
+            "barcode": producto.codigo_proveedor,
         }

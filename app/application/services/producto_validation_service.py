@@ -28,7 +28,12 @@ class ProductoValidationService:
             motivos,
             cumple,
         )
-        self._check(producto.publicable_web is True, "item_web=true", "ITEM_WEB_NO_VALIDO", motivos, cumple)
+        if producto.publicable_web is True:
+            cumple.append("item_web=true")
+        elif producto.publicable_web is False:
+            motivos.append("ITEM_WEB_FALSE")
+        else:
+            motivos.append("ITEM_WEB_NO_CONFIRMADO")
         self._check(not producto.item_disabled, "item_disabled=false", "ITEM_DISABLED", motivos, cumple)
         self._check(not producto.item_not_for_sale, "item_not4Sale=false", "ITEM_NOT_FOR_SALE", motivos, cumple)
         self._check(
@@ -49,6 +54,13 @@ class ProductoValidationService:
             producto.stock is not None and producto.stock.consultable,
             "Stock disponible consultable",
             "STOCK_NO_CONSULTABLE",
+            motivos,
+            cumple,
+        )
+        self._check(
+            producto.stock is not None and producto.stock.cantidad > 0,
+            "Stock mayor a 0",
+            "STOCK_SIN_DISPONIBLE",
             motivos,
             cumple,
         )
@@ -82,4 +94,6 @@ class ProductoValidationService:
 
     @staticmethod
     def _decision_por_motivo(motivo: str) -> str:
+        if motivo.startswith("ERROR_"):
+            return motivo
         return f"NO_PUBLICAR_{motivo}"

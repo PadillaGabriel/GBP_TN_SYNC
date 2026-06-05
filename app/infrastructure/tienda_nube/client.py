@@ -30,10 +30,7 @@ class TiendaNubeClient:
         }
 
     async def get_product_by_sku(self, sku: str) -> dict[str, Any] | None:
-        """Busca producto por SKU.
-
-        La implementación exacta puede requerir paginación según API vigente.
-        """
+        """Busca producto por SKU."""
 
         url = f"{self.base_url}/{self.store_id}/products/sku/{sku}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -58,6 +55,36 @@ class TiendaNubeClient:
         url = f"{self.base_url}/{self.store_id}/products/{product_id}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.put(url, headers=self.headers, json=payload)
+            response.raise_for_status()
+            return response.json()
+
+    async def list_categories(self, *, per_page: int = 200, max_pages: int = 10) -> list[dict[str, Any]]:
+        """Lista categorias de Tienda Nube con paginacion defensiva."""
+
+        categories: list[dict[str, Any]] = []
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            for page in range(1, max_pages + 1):
+                url = f"{self.base_url}/{self.store_id}/categories"
+                response = await client.get(
+                    url,
+                    headers=self.headers,
+                    params={"page": page, "per_page": per_page},
+                )
+                response.raise_for_status()
+                data = response.json()
+                if not isinstance(data, list) or not data:
+                    break
+                categories.extend(data)
+                if len(data) < per_page:
+                    break
+        return categories
+
+    async def create_category(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Crea categoria o subcategoria en Tienda Nube."""
+
+        url = f"{self.base_url}/{self.store_id}/categories"
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(url, headers=self.headers, json=payload)
             response.raise_for_status()
             return response.json()
 

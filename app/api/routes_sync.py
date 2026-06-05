@@ -139,3 +139,39 @@ async def importar_prueba_tienda_nube(
             "error": f"{type(exc).__name__}: {exc}",
         }
 
+
+
+@router.post("/import/tienda-nube-manual")
+async def importar_producto_manual_tienda_nube(
+    sku: str | None = Query(default=None),
+    item_id: int | None = Query(default=None),
+    confirm: bool = Query(default=False),
+    forzar: bool = Query(default=False),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Importa o actualiza manualmente un producto puntual.
+
+    Seguridad:
+    - Con DRY_RUN=true nunca escribe en Tienda Nube.
+    - Para escribir realmente se requiere DRY_RUN=false y confirm=true.
+    - Si el producto está bloqueado se requiere forzar=true.
+    """
+
+    settings = get_settings()
+    try:
+        service = TiendaNubeImportService(settings=settings, db=db)
+        return await service.importar_producto_manual_tienda_nube(
+            sku=sku,
+            item_id=item_id,
+            confirm=confirm,
+            forzar=forzar,
+        )
+    except Exception as exc:  # noqa: BLE001 - diagnóstico operativo.
+        logger.exception("TN_IMPORT_MANUAL_ENDPOINT_ERROR")
+        return {
+            "ok": False,
+            "dry_run": settings.dry_run,
+            "confirm": confirm,
+            "forzar": forzar,
+            "error": f"{type(exc).__name__}: {exc}",
+        }

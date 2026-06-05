@@ -1,3 +1,9 @@
+from __future__ import annotations
+
+import re
+import unicodedata
+from typing import Any
+
 from app.domain.models.producto import Producto
 from app.domain.models.stock import StockProducto
 from app.domain.models.sync_result import SyncResult
@@ -17,7 +23,8 @@ class TiendaNubeAdapter(PublicadorEcommerce):
         """Crea o actualiza producto completo en Tienda Nube."""
 
         existing = await self.client.get_product_by_sku(producto.sku)
-        payload = self.builder.build_product_payload(producto)
+        category_ids = await self._ensure_category_tree(producto)
+        payload = self.builder.build_product_payload(producto, category_ids=category_ids)
         if existing is None:
             created = await self.client.create_product(payload)
             return SyncResult(
@@ -25,7 +32,7 @@ class TiendaNubeAdapter(PublicadorEcommerce):
                 accion="crear_producto",
                 sku=producto.sku,
                 mensaje="Producto creado en Tienda Nube",
-                detalles={"tn_product": created},
+                detalles={"tn_product": created, "category_ids": category_ids},
             )
 
         product_id = str(existing["id"])
@@ -35,7 +42,7 @@ class TiendaNubeAdapter(PublicadorEcommerce):
             accion="actualizar_producto",
             sku=producto.sku,
             mensaje="Producto actualizado en Tienda Nube",
-            detalles={"tn_product": updated},
+            detalles={"tn_product": updated, "category_ids": category_ids},
         )
 
     async def actualizar_stock(self, stock: StockProducto) -> SyncResult:
@@ -68,3 +75,83 @@ class TiendaNubeAdapter(PublicadorEcommerce):
             mensaje="Stock actualizado en Tienda Nube",
             detalles={"tn_variant": updated},
         )
+
+    async def _ensure_category_tree(self, producto: Producto) -> list[int]:
+        """Asegura categoria y subcategoria en Tienda Nube y devuelve IDs para el producto."""
+
+        categoria = self._clean_category_name(producto.categoria_nombre)
+        subcategoria = self._clean_category_name(producto.subcategoria_nombre)
+        if not categoria:
+            return []
+
+        categories = await self.client.list_categories()
+        parent = self._find_category(categories, name=categoria, parent_id=None)
+        if parent is None:
+            parent = await self.client.create_category({"name": {"es": categoria}})
+            categories.append(parent)
+
+        parent_id = self._extract_id(parent)
+        if parent_id is None or not subcategoria:
+            return [parent_id] if parent_id is not None else []
+
+        child = self._find_category(categories, name=subcategoria, parent_id=parent_id)
+        if child is None:
+            child = await self.client.create_category({"name": {"es": subcategoria}, "parent": parent_id})
+
+        child_id = self._extract_id(child)
+        return [parent_id, child_id] if child_id is not None else [parent_id]
+
+    @classmethod
+    def _find_category(
+        cls,
+        categories: list[dict[str, Any]],
+        *,
+        name: str,
+        parent_id: int | None,
+    ) -> dict[str, Any] | None:
+        target_name = cls._normalize_name(name)
+        for category in categories:
+            category_name = cls._category_es_name(category)
+            if cls._normalize_name(category_name) != target_name:
+                continue
+            category_parent = cls._extract_parent_id(category)
+            if category_parent == parent_id:
+                return category
+        return None
+
+    @staticmethod
+    def _category_es_name(category: dict[str, Any]) -> str:
+        name = category.get("name")
+        if isinstance(name, dict):
+            return str(name.get("es") or name.get("pt") or name.get("en") or "")
+        return str(name or "")
+
+    @staticmethod
+    def _extract_id(category: dict[str, Any]) -> int | None:
+        value = category.get("id")
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _extract_parent_id(cls, category: dict[str, Any]) -> int | None:
+        parent = category.get("parent")
+        if isinstance(parent, dict):
+            return cls._extract_id(parent)
+        try:
+            return int(parent) if parent not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _clean_category_name(value: str | None) -> str | None:
+        text = str(value or "").strip()
+        return text or None
+
+    @staticmethod
+    def _normalize_name(value: str) -> str:
+        text = unicodedata.normalize("NFKD", value.strip().lower())
+        text = "".join(char for char in text if not unicodedata.combining(char))
+        text = re.sub(r"\s+", " ", text)
+        return text

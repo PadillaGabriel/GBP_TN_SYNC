@@ -49,17 +49,36 @@ def listar_productos(
     }
 
 
-@router.get("/productos/bloqueados")
-def listar_bloqueados(db: Session = Depends(get_db_session)) -> dict[str, object]:
-    """Lista productos bloqueados o no publicables."""
+@router.get("/productos/importados")
+def listar_importados(
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Lista productos ya mapeados en Tienda Nube."""
 
     productos = ProductoRepository(db)
-    items = [
-        item
-        for item in productos.listar_panel_productos(limit=500)
-        if str(item.get("decision", "")).startswith("NO_PUBLICAR")
-    ]
-    return {"items": items}
+    return {
+        "limit": limit,
+        "offset": offset,
+        "items": productos.listar_productos_importados(limit=limit, offset=offset),
+    }
+
+
+@router.get("/productos/bloqueados")
+def listar_bloqueados(
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Lista productos bloqueados o no publicables con motivo y acción manual."""
+
+    productos = ProductoRepository(db)
+    return {
+        "limit": limit,
+        "offset": offset,
+        "items": productos.listar_productos_bloqueados(limit=limit, offset=offset),
+    }
 
 
 @router.get("/depositos")

@@ -127,15 +127,26 @@ class ProductoRepository:
         return self.db.scalar(select(ProductoFuenteModel).where(ProductoFuenteModel.sku == sku))
 
     def listar_publicables_para_importar(self, limit: int = 20) -> list[dict[str, object]]:
-        """Lista productos validados como publicables para importación controlada."""
+        """Lista productos validados como publicables para importación controlada.
+
+        Excluye productos ya mapeados en Tienda Nube para que los lotes de
+        importación controlada no vuelvan a seleccionar los mismos SKUs. Si se
+        necesita reimportar un SKU existente, usar el endpoint manual.
+        """
 
         rows = self.db.execute(
-            select(ProductoFuenteModel, ProductoValidacionModel)
+            select(ProductoFuenteModel, ProductoValidacionModel, ProductoTiendaNubeModel)
             .join(
                 ProductoValidacionModel,
                 ProductoValidacionModel.producto_fuente_id == ProductoFuenteModel.id,
             )
+            .join(
+                ProductoTiendaNubeModel,
+                ProductoTiendaNubeModel.sku == ProductoFuenteModel.sku,
+                isouter=True,
+            )
             .where(ProductoValidacionModel.decision == "PUBLICABLE_AUTOMATICO")
+            .where(ProductoTiendaNubeModel.id.is_(None))
             .order_by(ProductoFuenteModel.ultima_validacion.desc().nullslast())
             .limit(limit)
         ).all()
@@ -147,7 +158,7 @@ class ProductoRepository:
                 "titulo": producto.titulo,
                 "decision": validacion.decision,
             }
-            for producto, validacion in rows
+            for producto, validacion, _mapeo in rows
         ]
 
     def guardar_mapeo_tienda_nube(
@@ -175,6 +186,7 @@ class ProductoRepository:
         model.tn_product_id = tn_product_id
         model.tn_variant_id = tn_variant_id
         model.estado_publicacion = estado_publicacion
+        model.ultima_sync_completa = datetime.now(UTC)
         self.db.commit()
         self.db.refresh(model)
         return model
@@ -209,6 +221,109 @@ class ProductoRepository:
             .limit(limit)
         ).all()
         return [self._to_panel_dict(producto, validacion) for producto, validacion in rows]
+
+
+    def listar_productos_importados(self, limit: int = 100, offset: int = 0) -> list[dict[str, object]]:
+        """Lista productos con mapeo Tienda Nube para revisión post-importación."""
+
+        rows = self.db.execute(
+            select(ProductoFuenteModel, ProductoValidacionModel, ProductoTiendaNubeModel)
+            .join(
+                ProductoTiendaNubeModel,
+                ProductoTiendaNubeModel.sku == ProductoFuenteModel.sku,
+            )
+            .join(
+                ProductoValidacionModel,
+                ProductoValidacionModel.producto_fuente_id == ProductoFuenteModel.id,
+                isouter=True,
+            )
+            .order_by(ProductoTiendaNubeModel.updated_at.desc())
+            .offset(offset)
+            .limit(limit)
+        ).all()
+        return [
+            self._to_importado_dict(producto, validacion, mapeo)
+            for producto, validacion, mapeo in rows
+        ]
+
+    def listar_productos_bloqueados(self, limit: int = 100, offset: int = 0) -> list[dict[str, object]]:
+        """Lista productos no importables con motivo visible para el panel."""
+
+        rows = self.db.execute(
+            select(ProductoFuenteModel, ProductoValidacionModel, ProductoTiendaNubeModel)
+            .join(
+                ProductoValidacionModel,
+                ProductoValidacionModel.producto_fuente_id == ProductoFuenteModel.id,
+            )
+            .join(
+                ProductoTiendaNubeModel,
+                ProductoTiendaNubeModel.sku == ProductoFuenteModel.sku,
+                isouter=True,
+            )
+            .where(ProductoValidacionModel.decision != "PUBLICABLE_AUTOMATICO")
+            .order_by(ProductoValidacionModel.validado_at.desc())
+            .offset(offset)
+            .limit(limit)
+        ).all()
+        return [
+            self._to_bloqueado_dict(producto, validacion, mapeo)
+            for producto, validacion, mapeo in rows
+        ]
+
+    def _stock_publicable_tn(self, producto_id: int) -> int | None:
+        """Devuelve stock publicable actual para Tienda Nube."""
+
+        return self.db.scalar(
+            select(StockActualModel.stock_publicable_tn).where(
+                StockActualModel.producto_fuente_id == producto_id,
+                StockActualModel.usado_para_tienda_nube.is_(True),
+            )
+        )
+
+    def _to_importado_dict(
+        self,
+        producto: ProductoFuenteModel,
+        validacion: ProductoValidacionModel | None,
+        mapeo: ProductoTiendaNubeModel,
+    ) -> dict[str, object]:
+        return {
+            "sku": producto.sku,
+            "id_sistema_gbp": producto.id_sistema_gbp,
+            "titulo": producto.titulo,
+            "categoria": producto.categoria_nombre,
+            "subcategoria": producto.subcategoria_nombre,
+            "marca": producto.marca_nombre,
+            "codigo_proveedor": producto.codigo_proveedor,
+            "precio_importado": float(producto.precio_importado) if producto.precio_importado else None,
+            "stock_publicable_tn": self._stock_publicable_tn(producto.id),
+            "decision": validacion.decision if validacion else "SIN_VALIDAR",
+            "motivos_bloqueo": validacion.motivos_bloqueo.split(",") if validacion and validacion.motivos_bloqueo else [],
+            "tn_product_id": mapeo.tn_product_id,
+            "tn_variant_id": mapeo.tn_variant_id,
+            "estado_publicacion": mapeo.estado_publicacion,
+            "ultima_sync_completa": mapeo.ultima_sync_completa.isoformat() if mapeo.ultima_sync_completa else None,
+            "created_at": mapeo.created_at.isoformat() if mapeo.created_at else None,
+            "updated_at": mapeo.updated_at.isoformat() if mapeo.updated_at else None,
+        }
+
+    def _to_bloqueado_dict(
+        self,
+        producto: ProductoFuenteModel,
+        validacion: ProductoValidacionModel,
+        mapeo: ProductoTiendaNubeModel | None,
+    ) -> dict[str, object]:
+        data = self._to_panel_dict(producto, validacion)
+        data.update(
+            {
+                "stock_publicable_tn": self._stock_publicable_tn(producto.id),
+                "descripcion_largo": len(producto.descripcion_web or ""),
+                "ya_importado_tienda_nube": mapeo is not None,
+                "tn_product_id": mapeo.tn_product_id if mapeo else None,
+                "accion_manual_disponible": True,
+                "endpoint_importacion_manual": f"/sync/import/tienda-nube-manual?sku={producto.sku}&forzar=true&confirm=true",
+            }
+        )
+        return data
 
     @staticmethod
     def _to_panel_dict(
