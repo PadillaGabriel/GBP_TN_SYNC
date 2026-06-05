@@ -16,7 +16,7 @@ def test_payload_uses_web_description_price_and_stock():
         stock=StockProducto(sku="SKU1", id_sistema_gbp="1", cantidad=7),
     )
     payload = TiendaNubePayloadBuilder().build_product_payload(producto)
-    assert payload["description"]["es"] == "Descripcion web"
+    assert payload["description"]["es"] == "<p>Descripcion web</p>"
     assert payload["variants"][0]["price"] == "123.46"
     assert payload["variants"][0]["stock"] == 7
 
@@ -36,7 +36,9 @@ def test_payload_uses_vendor_code_as_barcode_and_keeps_long_description():
 
     payload = TiendaNubePayloadBuilder().build_product_payload(producto)
 
-    assert payload["description"]["es"] == long_description
+    assert payload["description"]["es"].count("Organizador de Acero Cromado") == 400
+    assert payload["description"]["es"].startswith("<p>")
+    assert "<br>" in payload["description"]["es"]
     assert payload["variants"][0]["barcode"] == "PROV-123"
 
 
@@ -46,3 +48,49 @@ def test_payload_accepts_category_ids():
     payload = TiendaNubePayloadBuilder().build_product_payload(producto, category_ids=[10, 20])
 
     assert payload["categories"] == [10, 20]
+
+
+
+def test_payload_formats_description_with_paragraphs_bullets_and_separators():
+    description = """SOMOS SILMAR BAZAR ONLINE
+
+•Realizamos envíos a todo el pais
+•Si estas en CABA o GBA, tu pedido llega en el día
+
+============================================================
+DISPENSER JABON LIQUIDO DE CERAMICA
+
+•Art 6130
+-Alto: 17cm
+-Base: 9cm"""
+    producto = Producto(
+        sku="6130BL",
+        id_sistema_gbp="314",
+        titulo="DISPENSER C/ESPONJA BLANCO",
+        descripcion_web=description,
+        precio_importado=PrecioProducto(monto=Decimal("1000")),
+        stock=StockProducto(sku="6130BL", id_sistema_gbp="314", cantidad=3),
+    )
+
+    payload = TiendaNubePayloadBuilder().build_product_payload(producto)
+    html = payload["description"]["es"]
+
+    assert html.startswith("<p>SOMOS SILMAR BAZAR ONLINE</p>")
+    assert "<p>•Realizamos envíos a todo el pais<br>•Si estas en CABA o GBA" in html
+    assert "<hr>" in html
+    assert "<p>DISPENSER JABON LIQUIDO DE CERAMICA</p>" in html
+    assert "•Art 6130<br>-Alto: 17cm<br>-Base: 9cm" in html
+
+
+def test_payload_escapes_description_html_to_avoid_raw_markup():
+    producto = Producto(
+        sku="SKU1",
+        id_sistema_gbp="1",
+        titulo="Producto",
+        descripcion_web="Texto <script>alert(1)</script> & mas",
+    )
+
+    payload = TiendaNubePayloadBuilder().build_product_payload(producto)
+
+    assert "<script>" not in payload["description"]["es"]
+    assert "&lt;script&gt;alert(1)&lt;/script&gt; &amp; mas" in payload["description"]["es"]
