@@ -120,6 +120,65 @@ class ProductoRepository:
             model.ultima_consulta_gbp = datetime.now(UTC)
         self.db.commit()
 
+
+    def obtener_por_sku(self, sku: str) -> ProductoFuenteModel | None:
+        """Obtiene producto fuente por SKU."""
+
+        return self.db.scalar(select(ProductoFuenteModel).where(ProductoFuenteModel.sku == sku))
+
+    def listar_publicables_para_importar(self, limit: int = 20) -> list[dict[str, object]]:
+        """Lista productos validados como publicables para importación controlada."""
+
+        rows = self.db.execute(
+            select(ProductoFuenteModel, ProductoValidacionModel)
+            .join(
+                ProductoValidacionModel,
+                ProductoValidacionModel.producto_fuente_id == ProductoFuenteModel.id,
+            )
+            .where(ProductoValidacionModel.decision == "PUBLICABLE_AUTOMATICO")
+            .order_by(ProductoFuenteModel.ultima_validacion.desc().nullslast())
+            .limit(limit)
+        ).all()
+        return [
+            {
+                "id": producto.id,
+                "sku": producto.sku,
+                "id_sistema_gbp": producto.id_sistema_gbp,
+                "titulo": producto.titulo,
+                "decision": validacion.decision,
+            }
+            for producto, validacion in rows
+        ]
+
+    def guardar_mapeo_tienda_nube(
+        self,
+        *,
+        producto_fuente_id: int,
+        sku: str,
+        tn_product_id: str,
+        tn_variant_id: str | None = None,
+        estado_publicacion: str = "activo",
+    ) -> ProductoTiendaNubeModel:
+        """Inserta o actualiza el mapeo GBP ↔ Tienda Nube."""
+
+        model = self.db.scalar(
+            select(ProductoTiendaNubeModel).where(ProductoTiendaNubeModel.sku == sku)
+        )
+        if model is None:
+            model = ProductoTiendaNubeModel(
+                producto_fuente_id=producto_fuente_id,
+                sku=sku,
+                tn_product_id=tn_product_id,
+            )
+            self.db.add(model)
+        model.producto_fuente_id = producto_fuente_id
+        model.tn_product_id = tn_product_id
+        model.tn_variant_id = tn_variant_id
+        model.estado_publicacion = estado_publicacion
+        self.db.commit()
+        self.db.refresh(model)
+        return model
+
     def contar_productos(self) -> int:
         """Cuenta productos importados localmente."""
 

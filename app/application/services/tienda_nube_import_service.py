@@ -1,0 +1,270 @@
+from __future__ import annotations
+
+import logging
+import time
+from typing import Any
+
+from sqlalchemy.orm import Session
+
+from app.application.services.producto_validation_service import ProductoValidationService
+from app.infrastructure.gbp.client import GBPClient
+from app.infrastructure.gbp.normalizer import GBPNormalizer
+from app.infrastructure.gbp.xml_parser import normalizar_objeto_gbp
+from app.infrastructure.persistence.repositories import ProductoRepository, SyncAuditRepository
+from app.infrastructure.tienda_nube.adapter import TiendaNubeAdapter
+from app.infrastructure.tienda_nube.client import TiendaNubeClient
+from app.infrastructure.tienda_nube.payload_builder import TiendaNubePayloadBuilder
+from app.settings import Settings
+
+logger = logging.getLogger(__name__)
+
+
+class TiendaNubeImportService:
+    """Servicio de importación controlada desde GBP hacia Tienda Nube."""
+
+    def __init__(self, settings: Settings, db: Session) -> None:
+        self.settings = settings
+        self.db = db
+        self.gbp_client = GBPClient(
+            base_url=settings.gbp_base_url,
+            username=settings.gbp_username,
+            password=settings.gbp_password,
+            timeout_seconds=settings.gbp_timeout_seconds,
+            company_id=settings.gbp_company_id,
+            web_service_id=settings.gbp_web_service_id,
+        )
+        self.normalizer = GBPNormalizer()
+        self.validation_service = ProductoValidationService()
+        self.productos_repo = ProductoRepository(db)
+        self.audit_repo = SyncAuditRepository(db)
+        self.payload_builder = TiendaNubePayloadBuilder()
+
+    async def importar_prueba_tienda_nube(
+        self,
+        *,
+        limit: int = 20,
+        confirm: bool = False,
+    ) -> dict[str, Any]:
+        """Importa una muestra controlada de productos publicables.
+
+        Reglas de seguridad:
+        - Si DRY_RUN=true, no escribe en Tienda Nube aunque confirm=True.
+        - Si confirm=False, no escribe en Tienda Nube aunque DRY_RUN=false.
+        - Solo procesa productos con decisión PUBLICABLE_AUTOMATICO ya guardados.
+        """
+
+        started = time.perf_counter()
+        ejecutar_tn = bool(confirm and not self.settings.dry_run)
+        resumen: dict[str, Any] = {
+            "ok": True,
+            "dry_run": self.settings.dry_run,
+            "confirm": confirm,
+            "ejecuta_tienda_nube": ejecutar_tn,
+            "limit": limit,
+            "seleccionados": 0,
+            "procesados": 0,
+            "creados": 0,
+            "actualizados": 0,
+            "simulados": 0,
+            "bloqueados": 0,
+            "errores": 0,
+            "resultados": [],
+            "duration_ms": None,
+        }
+
+        productos_base = self.productos_repo.listar_publicables_para_importar(limit=limit)
+        resumen["seleccionados"] = len(productos_base)
+
+        token = await self.gbp_client.autenticar()
+        tn_adapter = self._crear_tienda_nube_adapter()
+
+        for base in productos_base:
+            sku = str(base["sku"])
+            item_id = str(base["id_sistema_gbp"])
+            try:
+                producto = await self._obtener_producto_publicable(token=token, item_id=item_id)
+                validacion = self.validation_service.validar_publicacion(producto)
+                if not validacion.publicable:
+                    resumen["bloqueados"] += 1
+                    resumen["resultados"].append(
+                        {
+                            "sku": sku,
+                            "id_sistema_gbp": item_id,
+                            "estado": "BLOQUEADO",
+                            "decision": validacion.decision,
+                            "motivos": validacion.motivos_bloqueo,
+                        }
+                    )
+                    continue
+
+                payload = self.payload_builder.build_product_payload(producto)
+                if not ejecutar_tn:
+                    resumen["simulados"] += 1
+                    resumen["procesados"] += 1
+                    resumen["resultados"].append(
+                        {
+                            "sku": producto.sku,
+                            "id_sistema_gbp": producto.id_sistema_gbp,
+                            "titulo": producto.titulo,
+                            "estado": "DRY_RUN" if self.settings.dry_run else "SIMULADO_SIN_CONFIRMACION",
+                            "accion": "crear_o_actualizar_producto",
+                            "precio": str(producto.precio_importado.monto) if producto.precio_importado else None,
+                            "stock": producto.stock.cantidad if producto.stock else None,
+                            "imagenes": len(producto.imagenes),
+                            "payload_preview": payload,
+                        }
+                    )
+                    continue
+
+                resultado = await tn_adapter.crear_o_actualizar_producto(producto)
+                resumen["procesados"] += 1
+                accion = resultado.accion
+                if accion == "crear_producto":
+                    resumen["creados"] += 1
+                elif accion == "actualizar_producto":
+                    resumen["actualizados"] += 1
+
+                tn_product = resultado.detalles.get("tn_product", {}) if resultado.detalles else {}
+                tn_product_id = self._extraer_tn_product_id(tn_product)
+                tn_variant_id = self._extraer_tn_variant_id(tn_product)
+                if tn_product_id:
+                    producto_model = self.productos_repo.obtener_por_sku(producto.sku)
+                    if producto_model is not None:
+                        self.productos_repo.guardar_mapeo_tienda_nube(
+                            producto_fuente_id=producto_model.id,
+                            sku=producto.sku,
+                            tn_product_id=tn_product_id,
+                            tn_variant_id=tn_variant_id,
+                            estado_publicacion="activo",
+                        )
+
+                self.audit_repo.registrar(
+                    sku=producto.sku,
+                    accion="TN_IMPORT_PRODUCT_TEST",
+                    estado="OK",
+                    mensaje=f"accion={accion} tn_product_id={tn_product_id or ''}",
+                    metodo_gbp="TiendaNubeAdapter.crear_o_actualizar_producto",
+                )
+                resumen["resultados"].append(
+                    {
+                        "sku": producto.sku,
+                        "id_sistema_gbp": producto.id_sistema_gbp,
+                        "titulo": producto.titulo,
+                        "estado": "OK",
+                        "accion": accion,
+                        "tn_product_id": tn_product_id,
+                        "tn_variant_id": tn_variant_id,
+                        "precio": str(producto.precio_importado.monto) if producto.precio_importado else None,
+                        "stock": producto.stock.cantidad if producto.stock else None,
+                        "imagenes": len(producto.imagenes),
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001 - una fila no debe cortar el lote.
+                logger.exception("tn_import_product_failed", extra={"sku": sku, "item_id": item_id})
+                self.db.rollback()
+                resumen["errores"] += 1
+                resumen["resultados"].append(
+                    {
+                        "sku": sku,
+                        "id_sistema_gbp": item_id,
+                        "estado": "ERROR",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+
+        resumen["duration_ms"] = int((time.perf_counter() - started) * 1000)
+        resumen["ok"] = resumen["errores"] == 0
+        self._registrar_resumen(resumen)
+        return normalizar_objeto_gbp(resumen)
+
+    async def _obtener_producto_publicable(self, *, token: str, item_id: str):
+        detalle = await self.gbp_client.obtener_producto_por_id(token, int(item_id))
+        imagenes = await self.gbp_client.obtener_imagenes_website_por_item_id(token, int(item_id))
+        detalle = {**detalle, **self._imagenes_desde_website(imagenes)}
+
+        precio_rows = await self.gbp_client.obtener_precio_por_item_id(
+            token,
+            item_id=int(item_id),
+            price_list_id=self.settings.online_price_list_id,
+        )
+        precio = self.normalizer.normalizar_precio(
+            precio_rows,
+            price_list_id=self.settings.online_price_list_id,
+        )
+        if precio is not None:
+            detalle["precio_online"] = precio.monto
+            detalle["prli_id"] = precio.lista_precio_id or str(self.settings.online_price_list_id)
+
+        producto = self.normalizer.normalizar_producto(detalle)
+        if precio is not None:
+            producto.precio_importado = precio
+
+        stock_rows = await self.gbp_client.obtener_stock_por_item_id(
+            token,
+            item_id=int(item_id),
+            storage_id=-1,
+        )
+        producto.stock = self.normalizer.normalizar_stock_desde_filas(
+            stock_rows,
+            sku=producto.sku,
+            id_sistema_gbp=producto.id_sistema_gbp,
+            ecommerce_storage_ids=self.settings.ecommerce_storage_id_list,
+        )
+        return producto
+
+    def _crear_tienda_nube_adapter(self) -> TiendaNubeAdapter:
+        client = TiendaNubeClient(
+            base_url=self.settings.tienda_nube_base_url,
+            store_id=self.settings.tienda_nube_store_id,
+            access_token=self.settings.tienda_nube_access_token,
+            timeout_seconds=self.settings.tienda_nube_timeout_seconds,
+        )
+        return TiendaNubeAdapter(client=client)
+
+    @staticmethod
+    def _imagenes_desde_website(row: dict[str, str]) -> dict[str, str]:
+        mapped: dict[str, str] = {}
+        for index in range(1, 11):
+            value = row.get(f"item_WebSite_url4Image{index}")
+            if value:
+                mapped[f"item_WebSite_url4Image{index}"] = value
+        return mapped
+
+    @staticmethod
+    def _extraer_tn_product_id(tn_product: object) -> str | None:
+        if isinstance(tn_product, dict):
+            value = tn_product.get("id")
+            return str(value) if value not in (None, "") else None
+        return None
+
+    @staticmethod
+    def _extraer_tn_variant_id(tn_product: object) -> str | None:
+        if not isinstance(tn_product, dict):
+            return None
+        variants = tn_product.get("variants") or []
+        if not variants or not isinstance(variants, list):
+            return None
+        first = variants[0]
+        if not isinstance(first, dict):
+            return None
+        value = first.get("id")
+        return str(value) if value not in (None, "") else None
+
+    def _registrar_resumen(self, resumen: dict[str, Any]) -> None:
+        try:
+            self.audit_repo.registrar(
+                sku=None,
+                accion="TN_IMPORT_TEST_RUN",
+                estado="OK" if resumen["ok"] else "OK_CON_ERRORES",
+                mensaje=(
+                    f"seleccionados={resumen['seleccionados']} procesados={resumen['procesados']} "
+                    f"creados={resumen['creados']} actualizados={resumen['actualizados']} "
+                    f"simulados={resumen['simulados']} bloqueados={resumen['bloqueados']} "
+                    f"errores={resumen['errores']} ejecuta_tn={resumen['ejecuta_tienda_nube']}"
+                ),
+                metodo_gbp="GBP->TiendaNube importar_prueba_tienda_nube",
+                duracion_ms=int(resumen["duration_ms"] or 0),
+            )
+        except Exception:  # noqa: BLE001 - no romper respuesta por auditoría.
+            logger.exception("tn_import_test_summary_persist_failed")
+            self.db.rollback()

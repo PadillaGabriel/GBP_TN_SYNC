@@ -11,7 +11,7 @@ class TiendaNubePayloadBuilder:
 
         payload: dict[str, Any] = {
             "name": {"es": producto.titulo},
-            "description": {"es": producto.descripcion or ""},
+            "description": {"es": producto.descripcion_web or ""},
             "variants": [self._build_main_variant(producto)],
         }
         if producto.imagenes:
@@ -23,7 +23,7 @@ class TiendaNubePayloadBuilder:
 
     @staticmethod
     def _build_main_variant(producto: Producto) -> dict[str, Any]:
-        precio = producto.precio_importado.monto if producto.precio_importado else 0
+        precio = producto.precio_importado.monto.quantize(__import__("decimal").Decimal("0.01")) if producto.precio_importado else 0
         stock = producto.stock.cantidad if producto.stock else 0
         return {
             "sku": producto.sku,

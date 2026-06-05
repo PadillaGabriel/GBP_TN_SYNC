@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.application.services.gbp_audit_service import GBPAuditService
+from app.application.services.tienda_nube_import_service import TiendaNubeImportService
 from app.dependencies import get_db_session
 from app.settings import get_settings
 
@@ -110,3 +111,31 @@ async def ejecutar_prueba_producto_gbp(
         )
     except Exception as exc:  # noqa: BLE001 - diagnóstico operativo.
         raise HTTPException(status_code=500, detail=f"Error en prueba producto GBP: {exc}") from exc
+
+@router.post("/import/tienda-nube-test")
+async def importar_prueba_tienda_nube(
+    limit: int = Query(default=20, ge=1, le=50),
+    confirm: bool = Query(default=False),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Importa una muestra controlada de productos publicables a Tienda Nube.
+
+    Seguridad:
+    - Con DRY_RUN=true nunca escribe en Tienda Nube.
+    - Para escribir realmente se requiere DRY_RUN=false y confirm=true.
+    - Solo usa productos ya validados como PUBLICABLE_AUTOMATICO.
+    """
+
+    settings = get_settings()
+    try:
+        service = TiendaNubeImportService(settings=settings, db=db)
+        return await service.importar_prueba_tienda_nube(limit=limit, confirm=confirm)
+    except Exception as exc:  # noqa: BLE001 - diagnóstico operativo.
+        logger.exception("TN_IMPORT_TEST_ENDPOINT_ERROR")
+        return {
+            "ok": False,
+            "dry_run": settings.dry_run,
+            "confirm": confirm,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
