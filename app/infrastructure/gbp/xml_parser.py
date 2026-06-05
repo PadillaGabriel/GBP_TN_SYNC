@@ -7,10 +7,46 @@ from xml.etree import ElementTree as ET
 from app.domain.errors import DatoIncompletoError
 
 
+MOJIBAKE_MARKERS = ("Ã", "Â", "�")
+
+
 def strip_namespace(tag: str) -> str:
     """Elimina namespace de un tag XML."""
 
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+
+def reparar_mojibake(value: str | None) -> str | None:
+    """Corrige texto UTF-8 leído erróneamente como Latin-1/Windows-1252.
+
+    GBP puede devolver contenido con acentos o eñes que llega como mojibake
+    después del parseo SOAP/XML. Ejemplos reales: ``DecoraciÃ³n`` y
+    ``GenÃ©rica``. La reparación se aplica solo si aparecen marcadores típicos
+    para no modificar texto correcto.
+    """
+
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return value
+    if not any(marker in value for marker in MOJIBAKE_MARKERS):
+        return value
+
+    for encoding in ("latin1", "cp1252"):
+        try:
+            repaired = value.encode(encoding).decode("utf-8")
+        except UnicodeError:
+            continue
+        if repaired and repaired != value:
+            return repaired
+    return value
+
+
+def normalizar_texto_gbp(value: str | None) -> str:
+    """Normaliza texto de GBP para uso interno y publicación."""
+
+    repaired = reparar_mojibake(value)
+    return (repaired or "").strip()
 
 
 def clean_xml_text(text: str) -> str:
@@ -82,7 +118,7 @@ def parse_dataset_tables(result_text: str) -> list[dict[str, str]]:
             continue
         row: dict[str, str] = {}
         for child in list(table):
-            row[strip_namespace(child.tag)] = (child.text or "").strip()
+            row[strip_namespace(child.tag)] = normalizar_texto_gbp(child.text)
         rows.append(row)
     return rows
 
@@ -93,7 +129,7 @@ def get_text_or_none(root: ET.Element, path: str) -> str | None:
     node = root.find(path)
     if node is None or node.text is None:
         return None
-    value = node.text.strip()
+    value = normalizar_texto_gbp(node.text)
     return value or None
 
 

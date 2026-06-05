@@ -7,6 +7,7 @@ from app.domain.models.medidas import MedidasProducto
 from app.domain.models.precio import PrecioProducto
 from app.domain.models.producto import Producto
 from app.domain.models.stock import StockDeposito, StockProducto
+from app.infrastructure.gbp.xml_parser import normalizar_texto_gbp
 
 
 class GBPNormalizer:
@@ -84,14 +85,14 @@ class GBPNormalizer:
         value = data.get(key)
         if value is None or str(value).strip() == "":
             raise DatoIncompletoError(f"GBP no devolvio el campo obligatorio: {key}")
-        return str(value).strip()
+        return normalizar_texto_gbp(str(value))
 
     @staticmethod
     def _optional_str(data: dict[str, Any], key: str) -> str | None:
         value = data.get(key)
         if value is None or str(value).strip() == "":
             return None
-        return str(value).strip()
+        return normalizar_texto_gbp(str(value))
 
     @staticmethod
     def _to_bool(value: object) -> bool:
