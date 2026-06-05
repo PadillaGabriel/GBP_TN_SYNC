@@ -129,6 +129,13 @@ class ProductoRepository:
 
         return self.db.scalar(select(ProductoFuenteModel).where(ProductoFuenteModel.sku == sku))
 
+
+    def obtener_skus_auditados(self) -> set[str]:
+        """Devuelve SKUs ya auditados/persistidos para evitar reprocesar desde el inicio."""
+
+        rows = self.db.scalars(select(ProductoFuenteModel.sku)).all()
+        return {str(sku).strip() for sku in rows if str(sku or "").strip()}
+
     def listar_publicables_para_importar(self, limit: int = 20) -> list[dict[str, object]]:
         """Lista productos validados como publicables para importación controlada.
 
@@ -451,19 +458,30 @@ class ProductoRepository:
         )
 
         if estado == "bloqueado_importado":
-            query = query.where(ProductoTiendaNubeModel.id.is_not(None)).where(
-                ProductoValidacionModel.decision != "PUBLICABLE_AUTOMATICO"
+            query = query.where(
+                ProductoTiendaNubeModel.id.is_not(None),
+                ProductoTiendaNubeModel.estado_publicacion.notin_(MAPEO_TN_ESTADOS_INACTIVOS),
+                ProductoValidacionModel.decision != "PUBLICABLE_AUTOMATICO",
             )
         elif estado == "bloqueado":
             query = query.where(ProductoValidacionModel.decision != "PUBLICABLE_AUTOMATICO")
         elif estado == "importado":
-            query = query.where(ProductoTiendaNubeModel.id.is_not(None))
+            query = query.where(
+                ProductoTiendaNubeModel.id.is_not(None),
+                ProductoTiendaNubeModel.estado_publicacion.notin_(MAPEO_TN_ESTADOS_INACTIVOS),
+            )
         elif estado == "publicable_pendiente":
             query = query.where(ProductoValidacionModel.decision == "PUBLICABLE_AUTOMATICO").where(
-                ProductoTiendaNubeModel.id.is_(None)
+                or_(
+                    ProductoTiendaNubeModel.id.is_(None),
+                    ProductoTiendaNubeModel.estado_publicacion.in_(MAPEO_TN_ESTADOS_INACTIVOS),
+                )
             )
         elif estado == "requiere_revision":
-            query = query.where(ProductoTiendaNubeModel.id.is_not(None)).where(
+            query = query.where(
+                ProductoTiendaNubeModel.id.is_not(None),
+                ProductoTiendaNubeModel.estado_publicacion.notin_(MAPEO_TN_ESTADOS_INACTIVOS),
+            ).where(
                 (ProductoValidacionModel.decision != "PUBLICABLE_AUTOMATICO")
                 | (StockActualModel.stock_publicable_tn <= 0)
             ).join(

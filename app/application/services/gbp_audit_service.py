@@ -99,6 +99,7 @@ class GBPAuditService:
         limit: int | None = None,
         concurrency: int = 3,
         guardar_en_db: bool = True,
+        solo_no_auditados: bool = False,
     ) -> dict[str, Any]:
         """Ejecuta auditoría real masiva GBP -> Railway con tolerancia a fallos.
 
@@ -113,6 +114,9 @@ class GBPAuditService:
             "dry_run": self.settings.dry_run,
             "total_catalogo": 0,
             "candidatos_con_imagen_website": 0,
+            "candidatos_ya_auditados": 0,
+            "candidatos_pendientes_auditar": 0,
+            "modo_incremental": solo_no_auditados,
             "procesados": 0,
             "publicables": 0,
             "bloqueados": 0,
@@ -130,10 +134,22 @@ class GBPAuditService:
             token = await self.client.autenticar()
             catalogo = await self.client.obtener_catalogo_basico(token)
             candidatos = [row for row in catalogo if any_website_image(row)]
-            seleccionados = candidatos[:limit] if limit else candidatos
+
+            candidatos_base = candidatos
+            if solo_no_auditados and self.db is not None:
+                skus_auditados = ProductoRepository(self.db).obtener_skus_auditados()
+                candidatos_base = [
+                    row
+                    for row in candidatos
+                    if str(row.get("item_code") or "").strip() not in skus_auditados
+                ]
+                resumen["candidatos_ya_auditados"] = len(candidatos) - len(candidatos_base)
+
+            seleccionados = candidatos_base[:limit] if limit else candidatos_base
 
             resumen["total_catalogo"] = len(catalogo)
             resumen["candidatos_con_imagen_website"] = len(candidatos)
+            resumen["candidatos_pendientes_auditar"] = len(candidatos_base)
 
             semaphore = asyncio.Semaphore(max(1, concurrency))
             tasks = [
@@ -193,7 +209,7 @@ class GBPAuditService:
                 try:
                     SyncAuditRepository(self.db).registrar(
                         sku=None,
-                        accion="GBP_AUDIT_PRODUCTS_RUN",
+                        accion="GBP_AUDIT_PRODUCTS_NEXT" if resumen.get("modo_incremental") else "GBP_AUDIT_PRODUCTS_RUN",
                         estado="ERROR_GLOBAL",
                         mensaje=str(resumen["error_global"]),
                         metodo_gbp=(
@@ -258,11 +274,13 @@ class GBPAuditService:
             estado = "OK" if resumen["ok"] else "OK_CON_ERRORES"
             SyncAuditRepository(self.db).registrar(  # type: ignore[arg-type]
                 sku=None,
-                accion="GBP_AUDIT_PRODUCTS_RUN",
+                accion="GBP_AUDIT_PRODUCTS_NEXT" if resumen.get("modo_incremental") else "GBP_AUDIT_PRODUCTS_RUN",
                 estado=estado,
                 mensaje=(
                     f"total_catalogo={resumen['total_catalogo']} "
                     f"candidatos={resumen['candidatos_con_imagen_website']} "
+                    f"ya_auditados={resumen.get('candidatos_ya_auditados', 0)} "
+                    f"pendientes_auditar={resumen.get('candidatos_pendientes_auditar', 0)} "
                     f"procesados={resumen['procesados']} "
                     f"publicables={resumen['publicables']} "
                     f"bloqueados={resumen['bloqueados']} "

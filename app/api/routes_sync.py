@@ -55,6 +55,40 @@ async def ejecutar_auditoria_productos_manual(
         }
 
 
+
+
+@router.post("/audit/productos/next")
+async def ejecutar_auditoria_productos_siguientes(
+    limit: int = Query(default=200, ge=1, le=1000),
+    concurrency: int = Query(default=3, ge=1, le=10),
+    save_to_db: bool = Query(default=True),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Audita los próximos productos con imagen Website que todavía no fueron auditados.
+
+    Evita reprocesar siempre desde el inicio del catálogo y permite avanzar por tandas.
+    No crea productos en Tienda Nube.
+    """
+
+    settings = get_settings()
+    try:
+        service = GBPAuditService(settings=settings, db=db)
+        return await service.ejecutar_auditoria_productos(
+            limit=limit,
+            concurrency=concurrency,
+            guardar_en_db=save_to_db,
+            solo_no_auditados=True,
+        )
+    except Exception as exc:  # noqa: BLE001 - diagnóstico operativo.
+        logger.exception("AUDIT_PRODUCTS_NEXT_ENDPOINT_ERROR")
+        return {
+            "ok": False,
+            "dry_run": settings.dry_run,
+            "error": f"{type(exc).__name__}: {exc}",
+            "message": "La auditoría incremental falló antes de devolver resumen. Revisar logs.",
+        }
+
+
 @router.post("/audit/gbp-test")
 async def ejecutar_prueba_parcial_gbp(
     limit: int = Query(default=20, ge=1, le=200),

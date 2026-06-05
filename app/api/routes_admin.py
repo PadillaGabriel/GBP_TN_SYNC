@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
+from app.application.services.gbp_audit_service import GBPAuditService
 from app.application.services.tienda_nube_import_service import TiendaNubeImportService
 from app.dependencies import get_db_session
 from app.infrastructure.persistence.repositories import (
@@ -469,6 +470,57 @@ def panel_decisiones(
             "settings": settings,
         },
     )
+
+
+
+
+@router.post("/panel/auditar-proximos")
+async def panel_auditar_proximos_productos(
+    batch_limit: int = Query(default=200, ge=1, le=1000),
+    concurrency: int = Query(default=3, ge=1, le=10),
+    estado: str = Query(default="publicable_pendiente"),
+    q: str | None = Query(default=None),
+    db: Session = Depends(get_db_session),
+) -> RedirectResponse:
+    """Acción visual: audita próximos productos no auditados, sin repetir desde el inicio."""
+
+    settings = get_settings()
+    service = GBPAuditService(settings=settings, db=db)
+    result = await service.ejecutar_auditoria_productos(
+        limit=batch_limit,
+        concurrency=concurrency,
+        guardar_en_db=True,
+        solo_no_auditados=True,
+    )
+    mensaje = (
+        f"Auditoría incremental finalizada. Procesados: {result.get('procesados', 0)}. "
+        f"Publicables: {result.get('publicables', 0)}. "
+        f"Bloqueados: {result.get('bloqueados', 0)}. "
+        f"Pendientes por auditar: {result.get('candidatos_pendientes_auditar', 0)}."
+    )
+    return _panel_redirect(estado, mensaje, q=q)
+
+
+@router.post("/panel/importar-pendientes")
+async def panel_importar_pendientes_tienda_nube(
+    batch_limit: int = Query(default=25, ge=1, le=200),
+    estado: str = Query(default="importado"),
+    q: str | None = Query(default=None),
+    db: Session = Depends(get_db_session),
+) -> RedirectResponse:
+    """Acción visual: importa productos publicables pendientes respetando reglas automáticas."""
+
+    settings = get_settings()
+    service = TiendaNubeImportService(settings=settings, db=db)
+    result = await service.importar_prueba_tienda_nube(limit=batch_limit, confirm=True)
+    mensaje = (
+        f"Importación finalizada. Seleccionados: {result.get('seleccionados', 0)}. "
+        f"Procesados: {result.get('procesados', 0)}. "
+        f"Creados: {result.get('creados', 0)}. "
+        f"Actualizados: {result.get('actualizados', 0)}. "
+        f"Errores: {result.get('errores', 0)}."
+    )
+    return _panel_redirect(estado, mensaje, q=q)
 
 
 @router.post("/panel/decisiones/reconciliar-tn")

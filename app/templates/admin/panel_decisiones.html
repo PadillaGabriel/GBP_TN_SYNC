@@ -59,7 +59,19 @@
         {% if q %}<a class="clear-link" href="/admin/panel/decisiones?estado={{ estado }}&limit={{ limit }}">Limpiar</a>{% endif %}
       </form>
 
-      <div class="maintenance-actions">
+      <div class="maintenance-actions ops-actions">
+        <form method="post" action="/admin/panel/auditar-proximos?batch_limit=50&estado=publicable_pendiente" data-confirm-title="Auditar próximos 50" data-confirm-text="Se auditarán los próximos 50 productos con imagen Website que todavía no fueron auditados. No se crean productos en Tienda Nube." data-confirm-kind="secondary">
+          <button class="btn secondary" type="submit">Auditar próximos 50</button>
+        </form>
+        <form method="post" action="/admin/panel/auditar-proximos?batch_limit=200&estado=publicable_pendiente" data-confirm-title="Auditar próximos 200" data-confirm-text="Se auditarán los próximos 200 productos no auditados. Este proceso puede tardar varios minutos." data-confirm-kind="secondary">
+          <button class="btn secondary" type="submit">Auditar próximos 200</button>
+        </form>
+        <form method="post" action="/admin/panel/importar-pendientes?batch_limit=25&estado=importado" data-confirm-title="Importar pendientes" data-confirm-text="Se importarán hasta 25 productos publicables pendientes. Con DRY_RUN=false escribirá en Tienda Nube." data-confirm-kind="primary">
+          <button class="btn primary" type="submit">Importar pendientes 25</button>
+        </form>
+        <form method="post" action="/admin/panel/importar-pendientes?batch_limit=50&estado=importado" data-confirm-title="Importar pendientes" data-confirm-text="Se importarán hasta 50 productos publicables pendientes. Con DRY_RUN=false escribirá en Tienda Nube." data-confirm-kind="primary">
+          <button class="btn primary" type="submit">Importar pendientes 50</button>
+        </form>
         <form method="post" action="/admin/panel/decisiones/reconciliar-tn?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Reconciliar con Tienda Nube" data-confirm-text="Se verificará si los productos mapeados localmente siguen existiendo en Tienda Nube. No crea ni elimina publicaciones. Solo corrige estados locales." data-confirm-kind="secondary">
           <button class="btn secondary" type="submit">Reconciliar TN</button>
         </form>
