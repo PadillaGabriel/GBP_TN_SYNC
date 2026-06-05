@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -6,6 +8,7 @@ from app.dependencies import get_db_session
 from app.settings import get_settings
 
 router = APIRouter(prefix="/sync", tags=["sync"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/stock/run")
@@ -42,7 +45,13 @@ async def ejecutar_auditoria_productos_manual(
             guardar_en_db=save_to_db,
         )
     except Exception as exc:  # noqa: BLE001 - diagnóstico operativo.
-        raise HTTPException(status_code=500, detail=f"Error en auditoría GBP: {exc}") from exc
+        logger.exception("AUDIT_PRODUCTS_ENDPOINT_ERROR")
+        return {
+            "ok": False,
+            "dry_run": settings.dry_run,
+            "error": f"{type(exc).__name__}: {exc}",
+            "message": "La auditoría falló antes de devolver resumen. Revisar logs.",
+        }
 
 
 @router.post("/audit/gbp-test")

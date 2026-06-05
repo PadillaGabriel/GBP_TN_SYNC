@@ -100,91 +100,185 @@ class GBPAuditService:
         concurrency: int = 3,
         guardar_en_db: bool = True,
     ) -> dict[str, Any]:
-        """Ejecuta auditoría real masiva GBP -> Railway.
+        """Ejecuta auditoría real masiva GBP -> Railway con tolerancia a fallos.
 
         No crea productos en Tienda Nube. No actualiza stock en Tienda Nube.
-        Valida producto, precio online y stock disponible usando las variables
-        ONLINE_PRICE_LIST_ID y ECOMMERCE_STORAGE_IDS.
+        Si un producto o una escritura de DB falla, el proceso conserva el
+        resumen parcial y devuelve JSON en lugar de cortar con HTTP 500.
         """
 
         started = time.perf_counter()
-        token = await self.client.autenticar()
-        catalogo = await self.client.obtener_catalogo_basico(token)
-        candidatos = [row for row in catalogo if any_website_image(row)]
-        seleccionados = candidatos[:limit] if limit else candidatos
+        resumen: dict[str, Any] = {
+            "ok": False,
+            "dry_run": self.settings.dry_run,
+            "total_catalogo": 0,
+            "candidatos_con_imagen_website": 0,
+            "procesados": 0,
+            "publicables": 0,
+            "bloqueados": 0,
+            "errores": 0,
+            "errores_persistencia": 0,
+            "decisiones": {},
+            "online_price_list_id": self.settings.online_price_list_id,
+            "ecommerce_storage_ids": self.settings.ecommerce_storage_id_list,
+            "duration_ms": 0,
+            "resultados_muestra": [],
+            "error_global": None,
+        }
 
-        semaphore = asyncio.Semaphore(max(1, concurrency))
-        tasks = [
-            self._procesar_candidato_completo(semaphore, token, row)
-            for row in seleccionados
-        ]
-        resultados = await asyncio.gather(*tasks)
+        try:
+            token = await self.client.autenticar()
+            catalogo = await self.client.obtener_catalogo_basico(token)
+            candidatos = [row for row in catalogo if any_website_image(row)]
+            seleccionados = candidatos[:limit] if limit else candidatos
 
-        procesados = len(resultados)
-        errores = sum(1 for row in resultados if row.get("error"))
-        publicables = sum(
-            1 for row in resultados if row.get("decision") == "PUBLICABLE_AUTOMATICO"
-        )
-        bloqueados = procesados - publicables - errores
+            resumen["total_catalogo"] = len(catalogo)
+            resumen["candidatos_con_imagen_website"] = len(candidatos)
 
-        decisiones: dict[str, int] = {}
-        for row in resultados:
-            decision = str(row.get("decision") or "ERROR_VALIDACION")
-            decisiones[decision] = decisiones.get(decision, 0) + 1
+            semaphore = asyncio.Semaphore(max(1, concurrency))
+            tasks = [
+                self._procesar_candidato_completo(semaphore, token, row)
+                for row in seleccionados
+            ]
+            resultados = await asyncio.gather(*tasks, return_exceptions=True)
 
-        if self.db is not None and guardar_en_db:
-            productos_repo = ProductoRepository(self.db)
-            audit_repo = SyncAuditRepository(self.db)
-            for row in resultados:
+            resultados_validos: list[dict[str, Any]] = []
+            for item in resultados:
+                if isinstance(item, Exception):
+                    logger.exception("gbp_audit_unhandled_task_error", exc_info=item)
+                    row = {
+                        "decision": "ERROR_VALIDACION",
+                        "publicable": False,
+                        "motivos": ["ERROR_NO_CONTROLADO"],
+                        "error": f"{type(item).__name__}: {item}",
+                    }
+                else:
+                    row = item
+                resultados_validos.append(row)
+
+            for row in resultados_validos:
+                resumen["procesados"] += 1
+                decision = str(row.get("decision") or "ERROR_VALIDACION")
+                decisiones = resumen["decisiones"]
+                decisiones[decision] = decisiones.get(decision, 0) + 1
+
                 if row.get("error"):
+                    resumen["errores"] += 1
+                elif decision == "PUBLICABLE_AUTOMATICO":
+                    resumen["publicables"] += 1
+                else:
+                    resumen["bloqueados"] += 1
+
+            if self.db is not None and guardar_en_db:
+                self._persistir_resultados_auditoria(resultados_validos, resumen)
+
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            resumen["duration_ms"] = duration_ms
+            resumen["ok"] = resumen["errores"] == 0 and resumen["errores_persistencia"] == 0
+            resumen["resultados_muestra"] = [
+                self._resultado_publico(row) for row in resultados_validos[:20]
+            ]
+
+            if self.db is not None and guardar_en_db:
+                self._registrar_resumen_auditoria(resumen)
+
+            return normalizar_objeto_gbp(resumen)
+
+        except Exception as exc:  # noqa: BLE001 - se devuelve resumen parcial.
+            logger.exception("gbp_audit_global_error")
+            resumen["ok"] = False
+            resumen["error_global"] = f"{type(exc).__name__}: {exc}"
+            resumen["duration_ms"] = int((time.perf_counter() - started) * 1000)
+            if self.db is not None and guardar_en_db:
+                try:
+                    SyncAuditRepository(self.db).registrar(
+                        sku=None,
+                        accion="GBP_AUDIT_PRODUCTS_RUN",
+                        estado="ERROR_GLOBAL",
+                        mensaje=str(resumen["error_global"]),
+                        metodo_gbp=(
+                            "ItemBasicData_funGetXMLData/wsItem_funGetXMLDataById/"
+                            "PriceListItems_funGetXMLData_Short/ItemStorage_funGetXMLData"
+                        ),
+                        duracion_ms=resumen["duration_ms"],
+                    )
+                except Exception:  # noqa: BLE001 - no romper respuesta al operador.
+                    logger.exception("gbp_audit_global_error_audit_log_failed")
+                    self.db.rollback()
+            return normalizar_objeto_gbp(resumen)
+
+    def _persistir_resultados_auditoria(
+        self,
+        resultados: list[dict[str, Any]],
+        resumen: dict[str, Any],
+    ) -> None:
+        """Guarda resultados de auditoría sin cortar el proceso por una fila."""
+
+        productos_repo = ProductoRepository(self.db)  # type: ignore[arg-type]
+        audit_repo = SyncAuditRepository(self.db)  # type: ignore[arg-type]
+
+        for row in resultados:
+            if row.get("error"):
+                try:
                     audit_repo.registrar(
                         sku=row.get("sku"),
                         accion="GBP_AUDIT_PRODUCT_ERROR",
                         estado="ERROR",
                         mensaje=str(row.get("error")),
-                        metodo_gbp="wsItem_funGetXMLDataById/PriceListItems_funGetXMLData_Short/ItemStorage_funGetXMLData",
+                        metodo_gbp=(
+                            "wsItem_funGetXMLDataById/PriceListItems_funGetXMLData_Short/"
+                            "ItemStorage_funGetXMLData"
+                        ),
                     )
-                    continue
+                except Exception:  # noqa: BLE001 - registrar el fallo y seguir.
+                    resumen["errores_persistencia"] += 1
+                    logger.exception("gbp_audit_error_row_persist_failed")
+                    self.db.rollback()  # type: ignore[union-attr]
+                continue
 
+            try:
                 producto = row["producto"]
                 resultado = row["resultado"]
                 producto_model = productos_repo.guardar_producto(producto)
                 productos_repo.guardar_validacion(producto_model.id, producto, resultado)
                 if producto.stock is not None:
                     productos_repo.guardar_stock(producto_model.id, producto.stock)
+            except Exception:  # noqa: BLE001 - una fila no debe tirar el endpoint.
+                resumen["errores_persistencia"] += 1
+                logger.exception(
+                    "gbp_audit_product_persist_failed",
+                    extra={"sku": row.get("sku"), "item_id": row.get("id_sistema_gbp")},
+                )
+                self.db.rollback()  # type: ignore[union-attr]
 
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            audit_repo.registrar(
+    def _registrar_resumen_auditoria(self, resumen: dict[str, Any]) -> None:
+        """Registra evento final de auditoría sin romper la respuesta."""
+
+        try:
+            estado = "OK" if resumen["ok"] else "OK_CON_ERRORES"
+            SyncAuditRepository(self.db).registrar(  # type: ignore[arg-type]
                 sku=None,
                 accion="GBP_AUDIT_PRODUCTS_RUN",
-                estado="OK" if errores == 0 else "OK_CON_ERRORES",
+                estado=estado,
                 mensaje=(
-                    f"total_catalogo={len(catalogo)} candidatos={len(candidatos)} "
-                    f"procesados={procesados} publicables={publicables} "
-                    f"bloqueados={bloqueados} errores={errores} decisiones={decisiones}"
+                    f"total_catalogo={resumen['total_catalogo']} "
+                    f"candidatos={resumen['candidatos_con_imagen_website']} "
+                    f"procesados={resumen['procesados']} "
+                    f"publicables={resumen['publicables']} "
+                    f"bloqueados={resumen['bloqueados']} "
+                    f"errores={resumen['errores']} "
+                    f"errores_persistencia={resumen['errores_persistencia']} "
+                    f"decisiones={resumen['decisiones']}"
                 ),
-                metodo_gbp="ItemBasicData_funGetXMLData/wsItem_funGetXMLDataById/PriceListItems_funGetXMLData_Short/ItemStorage_funGetXMLData",
-                duracion_ms=duration_ms,
+                metodo_gbp=(
+                    "ItemBasicData_funGetXMLData/wsItem_funGetXMLDataById/"
+                    "PriceListItems_funGetXMLData_Short/ItemStorage_funGetXMLData"
+                ),
+                duracion_ms=int(resumen["duration_ms"]),
             )
-
-        response = {
-            "ok": True,
-            "dry_run": self.settings.dry_run,
-            "total_catalogo": len(catalogo),
-            "candidatos_con_imagen_website": len(candidatos),
-            "procesados": procesados,
-            "publicables": publicables,
-            "bloqueados": bloqueados,
-            "errores": errores,
-            "decisiones": decisiones,
-            "online_price_list_id": self.settings.online_price_list_id,
-            "ecommerce_storage_ids": self.settings.ecommerce_storage_id_list,
-            "duration_ms": int((time.perf_counter() - started) * 1000),
-            "resultados_muestra": [
-                self._resultado_publico(row) for row in resultados[:20]
-            ],
-        }
-        return normalizar_objeto_gbp(response)
+        except Exception:  # noqa: BLE001 - no romper la respuesta por auditoría final.
+            logger.exception("gbp_audit_summary_persist_failed")
+            self.db.rollback()  # type: ignore[union-attr]
 
     async def ejecutar_prueba_producto(
         self,
