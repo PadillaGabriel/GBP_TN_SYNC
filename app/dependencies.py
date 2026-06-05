@@ -30,6 +30,8 @@ def get_gbp_adapter() -> GBPAdapter:
         username=settings.gbp_username,
         password=settings.gbp_password,
         timeout_seconds=settings.gbp_timeout_seconds,
+        company_id=settings.gbp_company_id,
+        web_service_id=settings.gbp_web_service_id,
     )
     registry = Module16Registry(strict=settings.gbp_module16_strict)
     return GBPAdapter(client=client, registry=registry)
