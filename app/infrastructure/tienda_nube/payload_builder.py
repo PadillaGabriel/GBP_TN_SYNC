@@ -1,3 +1,4 @@
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 from app.domain.models.producto import Producto
@@ -14,20 +15,42 @@ class TiendaNubePayloadBuilder:
             "description": {"es": producto.descripcion_web or ""},
             "variants": [self._build_main_variant(producto)],
         }
+
         if producto.imagenes:
             payload["images"] = [
-                {"src": str(imagen.url)} for imagen in sorted(producto.imagenes, key=lambda x: x.orden)
+                {"src": str(imagen.url)}
+                for imagen in sorted(producto.imagenes, key=lambda item: item.orden)
                 if imagen.url is not None
             ]
+
         return payload
 
     @staticmethod
+    def _format_price(value: Decimal | int | float | str | None) -> str:
+        """Formatea precio para Tienda Nube con 2 decimales."""
+
+        if value is None:
+            return "0.00"
+
+        amount = Decimal(str(value)).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
+        return str(amount)
+
+    @staticmethod
     def _build_main_variant(producto: Producto) -> dict[str, Any]:
-        precio = producto.precio_importado.monto.quantize(__import__("decimal").Decimal("0.01")) if producto.precio_importado else 0
+        precio = (
+            TiendaNubePayloadBuilder._format_price(producto.precio_importado.monto)
+            if producto.precio_importado
+            else "0.00"
+        )
+
         stock = producto.stock.cantidad if producto.stock else 0
+
         return {
             "sku": producto.sku,
-            "price": str(precio),
+            "price": precio,
             "stock": stock,
             "barcode": producto.codigo_universal,
         }
