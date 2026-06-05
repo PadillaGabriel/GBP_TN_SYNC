@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: integrador-gbp-tn
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: false
+      - key: DRY_RUN
+        value: true
+      - key: STOCK_SCHEDULER_ENABLED
+        value: false
+      - key: IMPORT_SCHEDULER_ENABLED
+        value: false
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_URL
+        sync: false
+      - key: GBP_USERNAME
+        sync: false
+      - key: GBP_PASSWORD
+        sync: false
+      - key: GBP_COMPANY_ID
+        sync: false
+      - key: GBP_WEB_SERVICE_ID
+        sync: false
+      - key: TIENDA_NUBE_STORE_ID
+        sync: false
+      - key: TIENDA_NUBE_ACCESS_TOKEN
+        sync: false
+      - key: ONLINE_PRICE_LIST_ID
+        sync: false
+      - key: ECOMMERCE_STORAGE_IDS
+        sync: false

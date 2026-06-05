@@ -1,0 +1,85 @@
+from pydantic import BaseModel, Field
+
+from app.domain.models.producto import Producto
+
+
+class ResultadoValidacionProducto(BaseModel):
+    """Resultado explicable de publicabilidad."""
+
+    decision: str
+    publicable: bool
+    motivos_bloqueo: list[str] = Field(default_factory=list)
+    cumple: list[str] = Field(default_factory=list)
+
+
+class ProductoValidationService:
+    """Evalua si un producto GBP puede publicarse automaticamente."""
+
+    def validar_publicacion(self, producto: Producto) -> ResultadoValidacionProducto:
+        motivos: list[str] = []
+        cumple: list[str] = []
+
+        self._check(bool(producto.sku.strip()), "SKU valido", "SIN_SKU", motivos, cumple)
+        self._check(bool(producto.titulo.strip()), "Titulo valido", "SIN_TITULO", motivos, cumple)
+        self._check(
+            producto.tiene_imagen_website,
+            "Imagen Website",
+            "SIN_IMAGEN_WEBSITE",
+            motivos,
+            cumple,
+        )
+        self._check(producto.publicable_web is True, "item_web=true", "ITEM_WEB_NO_VALIDO", motivos, cumple)
+        self._check(not producto.item_disabled, "item_disabled=false", "ITEM_DISABLED", motivos, cumple)
+        self._check(not producto.item_not_for_sale, "item_not4Sale=false", "ITEM_NOT_FOR_SALE", motivos, cumple)
+        self._check(
+            producto.tiene_descripcion_web,
+            "Descripcion Website",
+            "SIN_DESCRIPCION_WEB",
+            motivos,
+            cumple,
+        )
+        self._check(
+            producto.precio_online_valido,
+            "Precio online valido",
+            "SIN_PRECIO_ONLINE",
+            motivos,
+            cumple,
+        )
+        self._check(
+            producto.stock is not None and producto.stock.consultable,
+            "Stock disponible consultable",
+            "STOCK_NO_CONSULTABLE",
+            motivos,
+            cumple,
+        )
+
+        if motivos:
+            return ResultadoValidacionProducto(
+                decision=self._decision_por_motivo(motivos[0]),
+                publicable=False,
+                motivos_bloqueo=motivos,
+                cumple=cumple,
+            )
+
+        return ResultadoValidacionProducto(
+            decision="PUBLICABLE_AUTOMATICO",
+            publicable=True,
+            cumple=cumple,
+        )
+
+    @staticmethod
+    def _check(
+        condition: bool,
+        ok_label: str,
+        fail_code: str,
+        motivos: list[str],
+        cumple: list[str],
+    ) -> None:
+        if condition:
+            cumple.append(ok_label)
+        else:
+            motivos.append(fail_code)
+
+    @staticmethod
+    def _decision_por_motivo(motivo: str) -> str:
+        return f"NO_PUBLICAR_{motivo}"

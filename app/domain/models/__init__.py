@@ -1,0 +1,1 @@
+"""Modelos internos neutrales."""
