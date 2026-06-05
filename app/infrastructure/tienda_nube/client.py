@@ -58,6 +58,24 @@ class TiendaNubeClient:
             response.raise_for_status()
             return response.json()
 
+    async def hide_product(self, product_id: str) -> dict[str, Any]:
+        """Oculta/despublica un producto en Tienda Nube sin eliminarlo."""
+
+        return await self.update_product(product_id, {"published": False})
+
+    async def delete_product(self, product_id: str) -> dict[str, Any]:
+        """Elimina un producto en Tienda Nube."""
+
+        url = f"{self.base_url}/{self.store_id}/products/{product_id}"
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.delete(url, headers=self.headers)
+            if response.status_code == 404:
+                return {"id": product_id, "estado": "NO_EXISTE_EN_TIENDA_NUBE"}
+            response.raise_for_status()
+            if not response.content:
+                return {"id": product_id, "estado": "ELIMINADO"}
+            return response.json()
+
     async def list_categories(self, *, per_page: int = 200, max_pages: int = 10) -> list[dict[str, Any]]:
         """Lista categorias de Tienda Nube con paginacion defensiva."""
 

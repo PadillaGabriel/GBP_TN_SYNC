@@ -206,6 +206,70 @@ class ProductoRepository:
         ).all()
         return {str(decision): int(count) for decision, count in rows}
 
+    def contar_mapeos_tienda_nube(self) -> int:
+        """Cuenta productos con mapeo local hacia Tienda Nube."""
+
+        return int(self.db.scalar(select(func.count(ProductoTiendaNubeModel.id))) or 0)
+
+    def contar_publicables_pendientes_importar(self) -> int:
+        """Cuenta publicables sin mapeo en Tienda Nube."""
+
+        return int(
+            self.db.scalar(
+                select(func.count(ProductoFuenteModel.id))
+                .join(
+                    ProductoValidacionModel,
+                    ProductoValidacionModel.producto_fuente_id == ProductoFuenteModel.id,
+                )
+                .join(
+                    ProductoTiendaNubeModel,
+                    ProductoTiendaNubeModel.sku == ProductoFuenteModel.sku,
+                    isouter=True,
+                )
+                .where(ProductoValidacionModel.decision == "PUBLICABLE_AUTOMATICO")
+                .where(ProductoTiendaNubeModel.id.is_(None))
+            )
+            or 0
+        )
+
+    def contar_bloqueados_importados(self) -> int:
+        """Cuenta productos importados que hoy están bloqueados por la validación actual."""
+
+        return int(
+            self.db.scalar(
+                select(func.count(ProductoTiendaNubeModel.id))
+                .join(ProductoFuenteModel, ProductoFuenteModel.sku == ProductoTiendaNubeModel.sku)
+                .join(
+                    ProductoValidacionModel,
+                    ProductoValidacionModel.producto_fuente_id == ProductoFuenteModel.id,
+                )
+                .where(ProductoValidacionModel.decision != "PUBLICABLE_AUTOMATICO")
+            )
+            or 0
+        )
+
+    def resumen_operativo_panel(self) -> dict[str, object]:
+        """Devuelve métricas separadas para no confundir auditados con importados."""
+
+        decisiones = self.contar_por_decision()
+        productos_auditados = self.contar_productos()
+        productos_mapeados = self.contar_mapeos_tienda_nube()
+        publicables_total = int(decisiones.get("PUBLICABLE_AUTOMATICO", 0))
+        bloqueados_total = max(productos_auditados - publicables_total, 0)
+        return {
+            "productos_auditados": productos_auditados,
+            "productos_mapeados_tienda_nube": productos_mapeados,
+            "publicables_total": publicables_total,
+            "publicables_pendientes_importar": self.contar_publicables_pendientes_importar(),
+            "bloqueados_total": bloqueados_total,
+            "bloqueados_importados_tienda_nube": self.contar_bloqueados_importados(),
+            "bloqueados_por_motivo": {
+                decision: count
+                for decision, count in decisiones.items()
+                if decision != "PUBLICABLE_AUTOMATICO"
+            },
+        }
+
     def listar_panel_productos(self, limit: int = 100, offset: int = 0) -> list[dict[str, object]]:
         """Lista productos con datos relevantes para el panel."""
 
@@ -270,6 +334,76 @@ class ProductoRepository:
             for producto, validacion, mapeo in rows
         ]
 
+    def obtener_mapeo_tienda_nube_por_sku(self, sku: str) -> ProductoTiendaNubeModel | None:
+        """Obtiene mapeo local hacia Tienda Nube por SKU."""
+
+        return self.db.scalar(select(ProductoTiendaNubeModel).where(ProductoTiendaNubeModel.sku == sku))
+
+    def actualizar_estado_mapeo_tienda_nube(self, sku: str, estado_publicacion: str) -> ProductoTiendaNubeModel | None:
+        """Actualiza estado operativo del mapeo local sin borrar auditoría."""
+
+        model = self.obtener_mapeo_tienda_nube_por_sku(sku)
+        if model is None:
+            return None
+        model.estado_publicacion = estado_publicacion
+        model.ultima_sync_completa = datetime.now(UTC)
+        self.db.commit()
+        self.db.refresh(model)
+        return model
+
+    def listar_panel_decisiones(
+        self,
+        *,
+        estado: str = "requiere_revision",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, object]]:
+        """Lista productos para gestionar decisiones operativas desde el panel."""
+
+        query = (
+            select(ProductoFuenteModel, ProductoValidacionModel, ProductoTiendaNubeModel)
+            .join(
+                ProductoValidacionModel,
+                ProductoValidacionModel.producto_fuente_id == ProductoFuenteModel.id,
+                isouter=True,
+            )
+            .join(
+                ProductoTiendaNubeModel,
+                ProductoTiendaNubeModel.sku == ProductoFuenteModel.sku,
+                isouter=True,
+            )
+        )
+
+        if estado == "bloqueado_importado":
+            query = query.where(ProductoTiendaNubeModel.id.is_not(None)).where(
+                ProductoValidacionModel.decision != "PUBLICABLE_AUTOMATICO"
+            )
+        elif estado == "bloqueado":
+            query = query.where(ProductoValidacionModel.decision != "PUBLICABLE_AUTOMATICO")
+        elif estado == "importado":
+            query = query.where(ProductoTiendaNubeModel.id.is_not(None))
+        elif estado == "publicable_pendiente":
+            query = query.where(ProductoValidacionModel.decision == "PUBLICABLE_AUTOMATICO").where(
+                ProductoTiendaNubeModel.id.is_(None)
+            )
+        elif estado == "requiere_revision":
+            query = query.where(ProductoTiendaNubeModel.id.is_not(None)).where(
+                (ProductoValidacionModel.decision != "PUBLICABLE_AUTOMATICO")
+                | (StockActualModel.stock_publicable_tn <= 0)
+            ).join(
+                StockActualModel,
+                (StockActualModel.producto_fuente_id == ProductoFuenteModel.id)
+                & (StockActualModel.usado_para_tienda_nube.is_(True)),
+                isouter=True,
+            )
+        elif estado != "todos":
+            query = query.where(ProductoValidacionModel.decision == estado)
+
+        rows = self.db.execute(
+            query.order_by(ProductoFuenteModel.updated_at.desc()).offset(offset).limit(limit)
+        ).all()
+        return [self._to_decision_dict(producto, validacion, mapeo) for producto, validacion, mapeo in rows]
+
     def _stock_publicable_tn(self, producto_id: int) -> int | None:
         """Devuelve stock publicable actual para Tienda Nube."""
 
@@ -279,6 +413,51 @@ class ProductoRepository:
                 StockActualModel.usado_para_tienda_nube.is_(True),
             )
         )
+
+    def _to_decision_dict(
+        self,
+        producto: ProductoFuenteModel,
+        validacion: ProductoValidacionModel | None,
+        mapeo: ProductoTiendaNubeModel | None,
+    ) -> dict[str, object]:
+        """Serializa un producto con acciones de decisión disponibles."""
+
+        stock_publicable = self._stock_publicable_tn(producto.id)
+        decision = validacion.decision if validacion else "SIN_VALIDAR"
+        importado = mapeo is not None
+        bloqueado = decision != "PUBLICABLE_AUTOMATICO"
+        acciones: list[str] = []
+        if importado:
+            acciones.extend(["ocultar_tienda_nube", "eliminar_tienda_nube"])
+        if not importado or bloqueado:
+            acciones.append("importar_manual_forzada")
+        if importado and bloqueado:
+            acciones.append("mantener_importado_bajo_revision")
+        return {
+            "sku": producto.sku,
+            "id_sistema_gbp": producto.id_sistema_gbp,
+            "titulo": producto.titulo,
+            "categoria": producto.categoria_nombre,
+            "subcategoria": producto.subcategoria_nombre,
+            "marca": producto.marca_nombre,
+            "codigo_proveedor": producto.codigo_proveedor,
+            "precio_importado": float(producto.precio_importado) if producto.precio_importado else None,
+            "stock_publicable_tn": stock_publicable,
+            "decision": decision,
+            "motivos_bloqueo": validacion.motivos_bloqueo.split(",") if validacion and validacion.motivos_bloqueo else [],
+            "descripcion_largo": len(producto.descripcion_web or ""),
+            "ya_importado_tienda_nube": importado,
+            "tn_product_id": mapeo.tn_product_id if mapeo else None,
+            "tn_variant_id": mapeo.tn_variant_id if mapeo else None,
+            "estado_publicacion": mapeo.estado_publicacion if mapeo else None,
+            "requiere_revision": bool(importado and (bloqueado or (stock_publicable is not None and stock_publicable <= 0))),
+            "acciones_disponibles": acciones,
+            "endpoints": {
+                "ocultar_tienda_nube": f"/admin/decisiones/productos/{producto.sku}/ocultar-tn?confirm=true" if importado else None,
+                "eliminar_tienda_nube": f"/admin/decisiones/productos/{producto.sku}/eliminar-tn?confirm=true" if importado else None,
+                "importar_manual_forzada": f"/sync/import/tienda-nube-manual?sku={producto.sku}&forzar=true&confirm=true",
+            },
+        }
 
     def _to_importado_dict(
         self,
