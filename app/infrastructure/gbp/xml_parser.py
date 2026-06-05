@@ -205,6 +205,40 @@ def extract_result_text(soap_text: str, method_name: str) -> str:
     return ""
 
 
+
+def extract_node_full_text(node: ET.Element) -> str:
+    """Extrae texto completo de un nodo preservando contenido posterior a HTML interno.
+
+    GBP puede devolver campos Website con HTML escapado dentro del NewDataSet.
+    Al desescapar el XML interno, tags como <br>, <p>, <div> o <li> quedan
+    como hijos del campo. ElementTree deja el texto posterior a esos tags en
+    .tail, por lo que usar solo child.text trunca la descripción.
+    """
+
+    block_tags = {"br", "p", "div", "li", "ul", "ol", "section", "article"}
+    parts: list[str] = []
+
+    def walk(current: ET.Element) -> None:
+        tag = strip_namespace(current.tag).lower()
+        if current is not node and tag in block_tags:
+            parts.append("\n")
+        if current.text:
+            parts.append(current.text)
+        for nested in list(current):
+            walk(nested)
+            if nested.tail:
+                parts.append(nested.tail)
+        if current is not node and tag in {"p", "div", "li", "ul", "ol", "section", "article"}:
+            parts.append("\n")
+
+    walk(node)
+    text = "".join(parts)
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    text = re.sub(r"\n[ \t]+", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return normalizar_texto_gbp(text)
+
+
 def parse_dataset_tables(result_text: str) -> list[dict[str, str]]:
     """Convierte un NewDataSet XML en lista de filas dict."""
 
@@ -223,7 +257,7 @@ def parse_dataset_tables(result_text: str) -> list[dict[str, str]]:
             continue
         row: dict[str, str] = {}
         for child in list(table):
-            row[strip_namespace(child.tag)] = normalizar_texto_gbp(child.text)
+            row[strip_namespace(child.tag)] = extract_node_full_text(child)
         rows.append(row)
     return rows
 
