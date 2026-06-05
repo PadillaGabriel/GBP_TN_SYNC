@@ -7,7 +7,39 @@ from xml.etree import ElementTree as ET
 from app.domain.errors import DatoIncompletoError
 
 
-MOJIBAKE_MARKERS = ("Ã", "Â", "�")
+MOJIBAKE_MARKERS = ("Ã", "Â", "�", "", "")
+
+# Secuencias comunes cuando texto UTF-8 fue interpretado como Latin-1/CP1252
+# antes de llegar al parser XML. Algunas incluyen caracteres C1 que XML 1.0
+# considera inválidos; deben repararse antes de sanear el XML o se pierde
+# información, por ejemplo: MUÃECO -> MUÑECO.
+MOJIBAKE_SEQUENCES = {
+    "Ã": "Á",
+    "Ã": "É",
+    "Ã": "Í",
+    "Ã": "Ó",
+    "Ã“": "Ó",
+    "Ã": "Ú",
+    "Ã": "Ñ",
+    "Ã‘": "Ñ",
+    "Ã¡": "á",
+    "Ã©": "é",
+    "Ã­": "í",
+    "Ã³": "ó",
+    "Ãº": "ú",
+    "Ã±": "ñ",
+    "Ã¼": "ü",
+    "Â°": "°",
+}
+
+
+def reparar_secuencias_mojibake(value: str) -> str:
+    """Repara secuencias de mojibake antes de parsear XML."""
+
+    fixed = value
+    for bad, good in MOJIBAKE_SEQUENCES.items():
+        fixed = fixed.replace(bad, good)
+    return fixed
 
 
 def strip_namespace(tag: str) -> str:
@@ -29,6 +61,8 @@ def reparar_mojibake(value: str | None) -> str | None:
         return None
     if not isinstance(value, str):
         return value
+    value = reparar_secuencias_mojibake(value)
+
     if not any(marker in value for marker in MOJIBAKE_MARKERS):
         return value
 
@@ -46,6 +80,8 @@ def normalizar_texto_gbp(value: str | None) -> str:
     """Normaliza texto de GBP para uso interno y publicación."""
 
     repaired = reparar_mojibake(value)
+    if repaired is not None:
+        repaired = repaired.replace("\u00ad", "")
     return (repaired or "").strip()
 
 
@@ -61,6 +97,11 @@ def clean_xml_text(text: str) -> str:
 
     if cleaned.startswith("&lt;") or "&lt;NewDataSet" in cleaned[:200]:
         cleaned = html.unescape(cleaned)
+
+    # Reparar mojibake antes de remover caracteres inválidos XML. Si se
+    # elimina primero un C1 como \x91, se pierde la Ñ de secuencias como
+    # MUÃ\x91ECO.
+    cleaned = reparar_secuencias_mojibake(cleaned)
 
     cleaned = re.sub(r"[^\x09\x0A\x0D\x20-\uD7FF\uE000-\uFFFD]", "", cleaned)
     cleaned = re.sub(
