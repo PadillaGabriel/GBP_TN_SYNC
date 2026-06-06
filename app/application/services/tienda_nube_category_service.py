@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -72,6 +73,7 @@ class TiendaNubeCategoryService:
                 try:
                     await self.client.update_product_categories(str(product_id), categorias_nuevas)
                     productos_actualizados += 1
+                    await asyncio.sleep(0.35)
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("tn_category_product_reassign_failed", extra={"product_id": product_id})
                     errores_productos.append({"product_id": product_id, "error": f"{type(exc).__name__}: {exc}"})
@@ -89,6 +91,7 @@ class TiendaNubeCategoryService:
             for category_id in duplicate_ids_sorted:
                 try:
                     result = await self.client.delete_category(str(category_id))
+                    await asyncio.sleep(0.35)
                     if result.get("estado") in {"ELIMINADO", "NO_EXISTE_EN_TIENDA_NUBE"}:
                         categorias_eliminadas += 1
                 except Exception as exc:  # noqa: BLE001
@@ -164,6 +167,7 @@ class TiendaNubeCategoryService:
             categorias_a_crear.append(payload)
             if confirm:
                 created = await self.client.create_category(payload)
+                await asyncio.sleep(0.35)
                 created_id = self._extract_id(created)
                 if created_id is not None:
                     child_canonical_by_key[key] = created_id

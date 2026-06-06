@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any
 
 import httpx
@@ -19,6 +20,44 @@ class TiendaNubeClient:
         self.access_token = access_token
         self.timeout = httpx.Timeout(timeout_seconds)
 
+
+    async def _request_with_retries(
+        self,
+        client: httpx.AsyncClient,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Ejecuta requests a Tienda Nube con backoff defensivo.
+
+        Tienda Nube puede responder 429 Too Many Requests cuando se crean,
+        actualizan o eliminan muchas categorías/productos en ráfaga. En ese
+        caso no debe fallar la operación completa: se espera y se reintenta.
+        """
+
+        max_attempts = 6
+        base_delay_seconds = 1.25
+        response: httpx.Response | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            response = await client.request(method, url, **kwargs)
+            if response.status_code != 429:
+                return response
+
+            retry_after = response.headers.get("Retry-After")
+            if retry_after is not None:
+                try:
+                    delay_seconds = max(float(retry_after), base_delay_seconds)
+                except ValueError:
+                    delay_seconds = base_delay_seconds * attempt
+            else:
+                delay_seconds = base_delay_seconds * attempt
+
+            await asyncio.sleep(delay_seconds)
+
+        assert response is not None
+        return response
+
     @property
     def headers(self) -> dict[str, str]:
         """Headers obligatorios de Tienda Nube."""
@@ -34,7 +73,7 @@ class TiendaNubeClient:
 
         url = f"{self.base_url}/{self.store_id}/products/sku/{sku}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.get(url, headers=self.headers)
+            response = await self._request_with_retries(client, "GET", url, headers=self.headers)
             if response.status_code == 404:
                 return None
             response.raise_for_status()
@@ -46,7 +85,7 @@ class TiendaNubeClient:
 
         url = f"{self.base_url}/{self.store_id}/products/{product_id}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.get(url, headers=self.headers)
+            response = await self._request_with_retries(client, "GET", url, headers=self.headers)
             if response.status_code == 404:
                 return None
             response.raise_for_status()
@@ -57,7 +96,7 @@ class TiendaNubeClient:
 
         url = f"{self.base_url}/{self.store_id}/products"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(url, headers=self.headers, json=payload)
+            response = await self._request_with_retries(client, "POST", url, headers=self.headers, json=payload)
             response.raise_for_status()
             return response.json()
 
@@ -66,7 +105,7 @@ class TiendaNubeClient:
 
         url = f"{self.base_url}/{self.store_id}/products/{product_id}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.put(url, headers=self.headers, json=payload)
+            response = await self._request_with_retries(client, "PUT", url, headers=self.headers, json=payload)
             response.raise_for_status()
             return response.json()
 
@@ -80,7 +119,7 @@ class TiendaNubeClient:
 
         url = f"{self.base_url}/{self.store_id}/products/{product_id}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.delete(url, headers=self.headers)
+            response = await self._request_with_retries(client, "DELETE", url, headers=self.headers)
             if response.status_code == 404:
                 return {"id": product_id, "estado": "NO_EXISTE_EN_TIENDA_NUBE"}
             response.raise_for_status()
@@ -95,7 +134,9 @@ class TiendaNubeClient:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             for page in range(1, max_pages + 1):
                 url = f"{self.base_url}/{self.store_id}/categories"
-                response = await client.get(
+                response = await self._request_with_retries(
+                    client,
+                    "GET",
                     url,
                     headers=self.headers,
                     params={"page": page, "per_page": per_page},
@@ -116,7 +157,7 @@ class TiendaNubeClient:
 
         url = f"{self.base_url}/{self.store_id}/categories"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(url, headers=self.headers, json=payload)
+            response = await self._request_with_retries(client, "POST", url, headers=self.headers, json=payload)
             response.raise_for_status()
             return response.json()
 
@@ -128,7 +169,9 @@ class TiendaNubeClient:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             for page in range(1, max_pages + 1):
                 url = f"{self.base_url}/{self.store_id}/products"
-                response = await client.get(
+                response = await self._request_with_retries(
+                    client,
+                    "GET",
                     url,
                     headers=self.headers,
                     params={"page": page, "per_page": per_page},
@@ -155,7 +198,7 @@ class TiendaNubeClient:
 
         url = f"{self.base_url}/{self.store_id}/categories/{category_id}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.delete(url, headers=self.headers)
+            response = await self._request_with_retries(client, "DELETE", url, headers=self.headers)
             if response.status_code == 404:
                 return {"id": category_id, "estado": "NO_EXISTE_EN_TIENDA_NUBE"}
             response.raise_for_status()
@@ -173,6 +216,6 @@ class TiendaNubeClient:
         url = f"{self.base_url}/{self.store_id}/products/variants/{variant_id}"
         payload = {"stock": stock}
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.put(url, headers=self.headers, json=payload)
+            response = await self._request_with_retries(client, "PUT", url, headers=self.headers, json=payload)
             response.raise_for_status()
             return response.json()
