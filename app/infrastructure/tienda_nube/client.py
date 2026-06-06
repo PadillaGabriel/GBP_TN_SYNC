@@ -100,6 +100,8 @@ class TiendaNubeClient:
                     headers=self.headers,
                     params={"page": page, "per_page": per_page},
                 )
+                if response.status_code == 404 and page > 1:
+                    break
                 response.raise_for_status()
                 data = response.json()
                 if not isinstance(data, list) or not data:
