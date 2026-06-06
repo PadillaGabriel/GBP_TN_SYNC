@@ -137,6 +137,22 @@ class ProductoRepository:
         rows = self.db.scalars(select(ProductoFuenteModel.sku)).all()
         return {str(sku).strip() for sku in rows if str(sku or "").strip()}
 
+
+    def listar_skus_por_decision(self, decision: str, *, limit: int = 200) -> list[str]:
+        """Lista SKUs por decisión vigente para reauditorías focalizadas."""
+
+        rows = self.db.scalars(
+            select(ProductoFuenteModel.sku)
+            .join(
+                ProductoValidacionModel,
+                ProductoValidacionModel.producto_fuente_id == ProductoFuenteModel.id,
+            )
+            .where(ProductoValidacionModel.decision == decision)
+            .order_by(ProductoValidacionModel.validado_at.asc().nullsfirst())
+            .limit(limit)
+        ).all()
+        return [str(sku).strip() for sku in rows if str(sku or '').strip()]
+
     def listar_publicables_para_importar(self, limit: int = 20) -> list[dict[str, object]]:
         """Lista productos validados como publicables para importación controlada.
 

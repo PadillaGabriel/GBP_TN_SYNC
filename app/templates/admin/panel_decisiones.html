@@ -44,18 +44,28 @@
     </section>
 
     <section class="toolbar" aria-label="Filtros y búsqueda">
-      <nav class="tabs">
-        {% for key, label in estados %}
-          <a class="tab {% if key == estado %}active{% endif %}" href="/admin/panel/decisiones?estado={{ key }}&limit={{ limit }}{% if q %}&q={{ q | urlencode }}{% endif %}">{{ label }}</a>
-        {% endfor %}
-      </nav>
-
-      <form class="search-form" method="get" action="/admin/panel/decisiones">
-        <input type="hidden" name="estado" value="{{ estado }}">
-        <input type="hidden" name="limit" value="{{ limit }}">
-        <label for="q">Buscar</label>
-        <input id="q" name="q" value="{{ q }}" placeholder="SKU, título, categoría, ID TN">
-        <button type="submit">Buscar</button>
+      <form class="filter-form" method="get" action="/admin/panel/decisiones">
+        <div class="field-group">
+          <label for="estado">Estado</label>
+          <select id="estado" name="estado">
+            {% for key, label in estados %}
+              <option value="{{ key }}" {% if key == estado %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field-group grow">
+          <label for="q">Buscar</label>
+          <input id="q" name="q" value="{{ q }}" placeholder="SKU, título, categoría, marca, ID TN">
+        </div>
+        <div class="field-group small">
+          <label for="limit">Límite</label>
+          <select id="limit" name="limit">
+            {% for option in [50, 100, 200, 500] %}
+              <option value="{{ option }}" {% if option == limit %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button class="btn primary" type="submit">Aplicar</button>
         {% if q %}<a class="clear-link" href="/admin/panel/decisiones?estado={{ estado }}&limit={{ limit }}">Limpiar</a>{% endif %}
       </form>
 
@@ -78,6 +88,9 @@
         <form method="post" action="/admin/panel/jobs/auditar-todo?batch_limit=200&concurrency=3" data-async-job="true" data-confirm-title="Auditar todo" data-confirm-text="Se auditarán todos los productos GBP pendientes con imagen Website, por tandas, en segundo plano. No se crean productos en Tienda Nube." data-confirm-kind="secondary">
           <button class="btn secondary strong" type="submit">Auditar todo</button>
         </form>
+        <form method="post" action="/admin/panel/auditar-bloqueados-sin-descripcion?batch_limit=500&estado=publicable_pendiente" data-confirm-title="Reauditar sin descripción" data-confirm-text="Se volverán a consultar en GBP los productos bloqueados por falta de descripción. Sirve cuando ya cargaste descripciones nuevas en GBP." data-confirm-kind="secondary">
+          <button class="btn secondary" type="submit">Reauditar sin descripción</button>
+        </form>
         <form method="post" action="/admin/panel/importar-pendientes?batch_limit=25&estado=importado" data-confirm-title="Importar pendientes" data-confirm-text="Se importarán hasta 25 productos publicables pendientes. Con DRY_RUN=false escribirá en Tienda Nube." data-confirm-kind="primary">
           <button class="btn primary" type="submit">Importar pendientes 25</button>
         </form>
@@ -89,6 +102,9 @@
         </form>
         <form method="post" action="/admin/panel/decisiones/reconciliar-tn?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Reconciliar con Tienda Nube" data-confirm-text="Se verificará si los productos mapeados localmente siguen existiendo en Tienda Nube. No crea ni elimina publicaciones. Solo corrige estados locales." data-confirm-kind="secondary">
           <button class="btn secondary" type="submit">Reconciliar TN</button>
+        </form>
+        <form method="post" action="/admin/panel/categorias/normalizar-duplicadas?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Normalizar categorías duplicadas" data-confirm-text="Se reasignarán productos a categorías canónicas y se intentará eliminar categorías duplicadas en Tienda Nube. Usar después de importaciones masivas o si el menú muestra categorías repetidas." data-confirm-kind="danger">
+          <button class="btn danger-outline" type="submit">Normalizar categorías</button>
         </form>
         <form method="post" action="/admin/panel/decisiones/mapeos/marcar-eliminados-externos?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Marcar mapeos como eliminados externos" data-confirm-text="Usar solo si ya eliminaste manualmente las publicaciones en Tienda Nube. Los mapeos locales pasarán a eliminado_externo y esos SKUs podrán importarse nuevamente si siguen publicables." data-confirm-kind="danger">
           <button class="btn danger-outline" type="submit">Reset mapeos locales</button>

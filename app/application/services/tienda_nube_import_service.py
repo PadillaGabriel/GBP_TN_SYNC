@@ -639,7 +639,12 @@ class TiendaNubeImportService:
             access_token=self.settings.tienda_nube_access_token,
             timeout_seconds=self.settings.tienda_nube_timeout_seconds,
         )
-        return TiendaNubeAdapter(client=client)
+        return TiendaNubeAdapter(
+            client=client,
+            image_normalization_enabled=self.settings.image_normalization_enabled,
+            image_normalization_base_url=self.settings.app_public_base_url,
+            image_normalization_canvas_size=self.settings.image_normalization_canvas_size,
+        )
 
     @staticmethod
     def _imagenes_desde_website(row: dict[str, str]) -> dict[str, str]:

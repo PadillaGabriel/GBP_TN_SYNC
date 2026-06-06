@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.application.jobs.bulk_jobs import ejecutar_job_auditar_todo, ejecutar_job_importar_todo
 from app.application.services.gbp_audit_service import GBPAuditService
 from app.application.services.tienda_nube_import_service import TiendaNubeImportService
+from app.application.services.tienda_nube_category_service import TiendaNubeCategoryService
 from app.dependencies import get_db_session
 from app.infrastructure.persistence.repositories import (
     DepositoRepository,
@@ -662,6 +663,59 @@ def panel_marcar_mapeos_eliminados_externos(
     )
     return _panel_redirect(estado, mensaje, q=q)
 
+
+
+
+@router.post("/panel/categorias/normalizar-duplicadas")
+async def panel_normalizar_categorias_duplicadas(
+    confirm: bool = Query(default=True),
+    estado: str = Query(default="todos"),
+    q: str | None = Query(default=None),
+    db: Session = Depends(get_db_session),
+) -> RedirectResponse:
+    """Reasigna productos a categorias canonicas y elimina duplicados de Tienda Nube."""
+
+    settings = get_settings()
+    service = TiendaNubeCategoryService(settings=settings, audit_repo=SyncAuditRepository(db))
+    result = await service.normalizar_categorias_duplicadas(confirm=confirm)
+    mensaje = (
+        f"Categorías normalizadas. Duplicadas detectadas: {result.get('categorias_duplicadas_detectadas', 0)}. "
+        f"Productos actualizados: {result.get('productos_actualizados', 0)}. "
+        f"Categorías eliminadas: {result.get('categorias_eliminadas', 0)}. "
+        f"Errores: {len(result.get('errores_productos', [])) + len(result.get('errores_eliminacion', []))}."
+    )
+    return _panel_redirect(estado, mensaje, q=q)
+
+
+@router.post("/panel/auditar-bloqueados-sin-descripcion")
+async def panel_auditar_bloqueados_sin_descripcion(
+    batch_limit: int = Query(default=200, ge=1, le=1000),
+    concurrency: int = Query(default=3, ge=1, le=10),
+    estado: str = Query(default="publicable_pendiente"),
+    q: str | None = Query(default=None),
+    db: Session = Depends(get_db_session),
+) -> RedirectResponse:
+    """Reaudita bloqueados por falta de descripción para detectar descripciones nuevas en GBP."""
+
+    settings = get_settings()
+    productos = ProductoRepository(db)
+    skus = productos.listar_skus_por_decision("NO_PUBLICAR_SIN_DESCRIPCION_WEB", limit=batch_limit)
+    service = TiendaNubeImportService(settings=settings, db=db)
+    procesados = 0
+    publicables = 0
+    errores = 0
+    for sku in skus:
+        result = await service.importar_producto_manual_tienda_nube(sku=sku, confirm=False, forzar=False)
+        procesados += 1
+        if result.get("decision") == "PUBLICABLE_AUTOMATICO":
+            publicables += 1
+        if not result.get("ok"):
+            errores += 1
+    mensaje = (
+        f"Reauditoría de bloqueados sin descripción finalizada. Procesados: {procesados}. "
+        f"Ahora publicables: {publicables}. Errores: {errores}."
+    )
+    return _panel_redirect(estado, mensaje, q=q)
 
 @router.post("/panel/decisiones/{sku}/ocultar-tn")
 async def panel_ocultar_producto_tienda_nube(

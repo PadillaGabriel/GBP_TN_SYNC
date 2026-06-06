@@ -2,6 +2,7 @@ from decimal import Decimal, ROUND_HALF_UP
 import html
 import re
 from typing import Any
+from urllib.parse import quote
 
 from app.domain.models.producto import Producto
 from app.infrastructure.gbp.xml_parser import normalizar_texto_gbp
@@ -9,6 +10,17 @@ from app.infrastructure.gbp.xml_parser import normalizar_texto_gbp
 
 class TiendaNubePayloadBuilder:
     """Construye payloads de Tienda Nube desde modelos internos."""
+
+    def __init__(
+        self,
+        *,
+        image_normalization_enabled: bool = False,
+        image_normalization_base_url: str = "",
+        image_normalization_canvas_size: int = 1600,
+    ) -> None:
+        self.image_normalization_enabled = image_normalization_enabled
+        self.image_normalization_base_url = image_normalization_base_url.rstrip("/")
+        self.image_normalization_canvas_size = image_normalization_canvas_size
 
     def build_product_payload(
         self,
@@ -29,13 +41,27 @@ class TiendaNubePayloadBuilder:
 
         if producto.imagenes:
             payload["images"] = [
-                {"src": str(imagen.url)}
+                {"src": self._build_image_url(str(imagen.url))}
                 for imagen in sorted(producto.imagenes, key=lambda item: item.orden)
                 if imagen.url is not None
             ]
 
         return payload
 
+
+    def _build_image_url(self, source_url: str) -> str:
+        """Devuelve URL original o URL normalizada pública para Tienda Nube."""
+
+        source_url = source_url.strip()
+        if (
+            not self.image_normalization_enabled
+            or not self.image_normalization_base_url
+            or not source_url.lower().startswith(("http://", "https://"))
+        ):
+            return source_url
+        encoded = quote(source_url, safe="")
+        size = int(self.image_normalization_canvas_size or 1600)
+        return f"{self.image_normalization_base_url}/media/normalized-image?src={encoded}&size={size}"
 
     @classmethod
     def _format_description_html(cls, value: str | None) -> str:

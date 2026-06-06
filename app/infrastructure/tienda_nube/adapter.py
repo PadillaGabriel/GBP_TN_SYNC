@@ -9,15 +9,27 @@ from app.domain.models.stock import StockProducto
 from app.domain.models.sync_result import SyncResult
 from app.domain.ports.publicador_ecommerce import PublicadorEcommerce
 from app.infrastructure.tienda_nube.client import TiendaNubeClient
+from app.infrastructure.tienda_nube.category_utils import normalize_category_key
 from app.infrastructure.tienda_nube.payload_builder import TiendaNubePayloadBuilder
 
 
 class TiendaNubeAdapter(PublicadorEcommerce):
     """Adaptador de Tienda Nube hacia contrato interno."""
 
-    def __init__(self, *, client: TiendaNubeClient) -> None:
+    def __init__(
+        self,
+        *,
+        client: TiendaNubeClient,
+        image_normalization_enabled: bool = False,
+        image_normalization_base_url: str = "",
+        image_normalization_canvas_size: int = 1600,
+    ) -> None:
         self.client = client
-        self.builder = TiendaNubePayloadBuilder()
+        self.builder = TiendaNubePayloadBuilder(
+            image_normalization_enabled=image_normalization_enabled,
+            image_normalization_base_url=image_normalization_base_url,
+            image_normalization_canvas_size=image_normalization_canvas_size,
+        )
 
     async def crear_o_actualizar_producto(self, producto: Producto) -> SyncResult:
         """Crea o actualiza producto completo en Tienda Nube."""
@@ -151,7 +163,4 @@ class TiendaNubeAdapter(PublicadorEcommerce):
 
     @staticmethod
     def _normalize_name(value: str) -> str:
-        text = unicodedata.normalize("NFKD", value.strip().lower())
-        text = "".join(char for char in text if not unicodedata.combining(char))
-        text = re.sub(r"\s+", " ", text)
-        return text
+        return normalize_category_key(value)

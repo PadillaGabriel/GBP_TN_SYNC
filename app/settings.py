@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     tienda_nube_timeout_seconds: int = 20
     tienda_nube_user_agent: str = "IntegradorGBP-TN/1.0"
 
+    image_normalization_enabled: bool = False
+    image_normalization_canvas_size: int = 1600
+
+
     online_price_list_id: int = 1
     ecommerce_storage_ids: str = ""
 
