@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.application.jobs.bulk_jobs import ejecutar_job_auditar_todo, ejecutar_job_importar_todo
 from app.application.services.gbp_audit_service import GBPAuditService
 from app.application.services.tienda_nube_import_service import TiendaNubeImportService
+from app.application.services.stock_sync_service import StockSyncService
 from app.dependencies import get_db_session
 from app.infrastructure.persistence.repositories import SyncJobRepository
 from app.settings import get_settings
@@ -119,16 +120,37 @@ async def importar_sku_directo_tienda_nube(
         }
 
 
-@router.post("/stock/run")
-async def ejecutar_sync_stock_manual() -> dict[str, object]:
-    """Endpoint manual para disparar sincronizacion de stock."""
+@router.post("/stock/run-now")
+async def ejecutar_sync_stock_manual(
+    limit: int = Query(default=100, ge=1, le=1000),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Sincroniza stock manualmente para productos ya mapeados en Tienda Nube."""
 
     settings = get_settings()
-    return {
-        "accepted": True,
-        "dry_run": settings.dry_run,
-        "message": "Job de stock aceptado. Implementacion productiva pendiente de conexion.",
-    }
+    service = StockSyncService(settings=settings, db=db)
+    return await service.sincronizar_lote(limit=limit)
+
+
+@router.post("/stock/run-sku")
+async def ejecutar_sync_stock_sku(
+    sku: str = Query(..., min_length=1),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Sincroniza stock de un SKU ya importado/mapeado."""
+
+    settings = get_settings()
+    service = StockSyncService(settings=settings, db=db)
+    return await service.sincronizar_sku(sku=sku.strip())
+
+
+@router.get("/stock/status")
+def obtener_status_stock(db: Session = Depends(get_db_session)) -> dict[str, object]:
+    """Devuelve estado operativo del módulo de stock."""
+
+    settings = get_settings()
+    service = StockSyncService(settings=settings, db=db)
+    return service.obtener_status()
 
 
 @router.post("/audit/productos/run")

@@ -450,6 +450,140 @@ class ProductoRepository:
 
         return bool(mapeo and mapeo.estado_publicacion not in MAPEO_TN_ESTADOS_INACTIVOS)
 
+    def listar_mapeos_activos_para_stock(self, limit: int = 100, offset: int = 0) -> list[dict[str, object]]:
+        """Lista productos activos en Tienda Nube para sincronización exclusiva de stock."""
+
+        rows = self.db.execute(
+            select(
+                ProductoFuenteModel.id,
+                ProductoFuenteModel.sku,
+                ProductoFuenteModel.id_sistema_gbp,
+                ProductoTiendaNubeModel.tn_product_id,
+                ProductoTiendaNubeModel.tn_variant_id,
+                StockActualModel.stock_publicable_tn,
+            )
+            .join(ProductoTiendaNubeModel, ProductoTiendaNubeModel.sku == ProductoFuenteModel.sku)
+            .join(
+                StockActualModel,
+                (StockActualModel.producto_fuente_id == ProductoFuenteModel.id)
+                & (StockActualModel.usado_para_tienda_nube.is_(True)),
+                isouter=True,
+            )
+            .where(ProductoTiendaNubeModel.estado_publicacion.notin_(MAPEO_TN_ESTADOS_INACTIVOS))
+            .order_by(
+                ProductoTiendaNubeModel.ultima_sync_stock.asc().nullsfirst(),
+                ProductoTiendaNubeModel.updated_at.asc(),
+            )
+            .offset(offset)
+            .limit(limit)
+        ).all()
+        return [
+            {
+                "producto_fuente_id": row[0],
+                "sku": row[1],
+                "id_sistema_gbp": row[2],
+                "tn_product_id": row[3],
+                "tn_variant_id": row[4],
+                "stock_publicable_tn": row[5],
+            }
+            for row in rows
+        ]
+
+    def obtener_mapeo_activo_para_stock_por_sku(self, sku: str) -> dict[str, object] | None:
+        """Obtiene un mapeo activo por SKU para sincronizar stock."""
+
+        rows = self.db.execute(
+            select(
+                ProductoFuenteModel.id,
+                ProductoFuenteModel.sku,
+                ProductoFuenteModel.id_sistema_gbp,
+                ProductoTiendaNubeModel.tn_product_id,
+                ProductoTiendaNubeModel.tn_variant_id,
+                StockActualModel.stock_publicable_tn,
+            )
+            .join(ProductoTiendaNubeModel, ProductoTiendaNubeModel.sku == ProductoFuenteModel.sku)
+            .join(
+                StockActualModel,
+                (StockActualModel.producto_fuente_id == ProductoFuenteModel.id)
+                & (StockActualModel.usado_para_tienda_nube.is_(True)),
+                isouter=True,
+            )
+            .where(ProductoFuenteModel.sku == sku)
+            .where(ProductoTiendaNubeModel.estado_publicacion.notin_(MAPEO_TN_ESTADOS_INACTIVOS))
+            .limit(1)
+        ).first()
+        if rows is None:
+            return None
+        return {
+            "producto_fuente_id": rows[0],
+            "sku": rows[1],
+            "id_sistema_gbp": rows[2],
+            "tn_product_id": rows[3],
+            "tn_variant_id": rows[4],
+            "stock_publicable_tn": rows[5],
+        }
+
+    def actualizar_variant_id_tienda_nube(self, sku: str, tn_variant_id: str) -> None:
+        """Actualiza variant_id local si fue resuelto durante sync de stock."""
+
+        model = self.obtener_mapeo_tienda_nube_por_sku(sku)
+        if model is None:
+            return
+        model.tn_variant_id = tn_variant_id
+        self.db.commit()
+
+    def marcar_stock_sync_tienda_nube(self, sku: str) -> None:
+        """Marca última sincronización de stock en mapeo y stock actual."""
+
+        now = datetime.now(UTC)
+        model = self.obtener_mapeo_tienda_nube_por_sku(sku)
+        if model is not None:
+            model.ultima_sync_stock = now
+
+        stock_rows = self.db.scalars(
+            select(StockActualModel).where(
+                StockActualModel.sku == sku,
+                StockActualModel.usado_para_tienda_nube.is_(True),
+            )
+        ).all()
+        for row in stock_rows:
+            row.ultima_actualizacion_tn = now
+        self.db.commit()
+
+    def resumen_stock_sync(self) -> dict[str, object]:
+        """Resumen operativo para stock scheduler y endpoints de estado."""
+
+        activos = self.contar_mapeos_tienda_nube()
+        sincronizados = int(
+            self.db.scalar(
+                select(func.count(ProductoTiendaNubeModel.id)).where(
+                    ProductoTiendaNubeModel.estado_publicacion.notin_(MAPEO_TN_ESTADOS_INACTIVOS),
+                    ProductoTiendaNubeModel.ultima_sync_stock.is_not(None),
+                )
+            )
+            or 0
+        )
+        pendientes = int(
+            self.db.scalar(
+                select(func.count(ProductoTiendaNubeModel.id)).where(
+                    ProductoTiendaNubeModel.estado_publicacion.notin_(MAPEO_TN_ESTADOS_INACTIVOS),
+                    ProductoTiendaNubeModel.ultima_sync_stock.is_(None),
+                )
+            )
+            or 0
+        )
+        ultimo = self.db.scalar(
+            select(func.max(ProductoTiendaNubeModel.ultima_sync_stock)).where(
+                ProductoTiendaNubeModel.estado_publicacion.notin_(MAPEO_TN_ESTADOS_INACTIVOS)
+            )
+        )
+        return {
+            "productos_mapeados_activos": activos,
+            "productos_con_stock_sync": sincronizados,
+            "productos_pendientes_stock_sync": pendientes,
+            "ultima_sync_stock": ultimo.isoformat() if ultimo else None,
+        }
+
     def listar_panel_decisiones(
         self,
         *,

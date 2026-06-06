@@ -210,8 +210,18 @@ class TiendaNubeClient:
                 return data
             return {"id": category_id, "estado": "ELIMINADO"}
 
+    async def update_variant_stock(self, *, product_id: str, variant_id: str, stock: int) -> dict[str, Any]:
+        """Actualiza solo stock de una variante de un producto."""
+
+        url = f"{self.base_url}/{self.store_id}/products/{product_id}/variants/{variant_id}"
+        payload = {"stock": stock}
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await self._request_with_retries(client, "PUT", url, headers=self.headers, json=payload)
+            response.raise_for_status()
+            return response.json()
+
     async def update_stock(self, variant_id: str, stock: int) -> dict[str, Any]:
-        """Actualiza solo stock de una variante."""
+        """Compatibilidad legacy. No usar para flujo nuevo: falta product_id."""
 
         url = f"{self.base_url}/{self.store_id}/products/variants/{variant_id}"
         payload = {"stock": stock}

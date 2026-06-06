@@ -125,6 +125,27 @@
         </div>
       </article>
 
+      <article class="control-card stock-card">
+        <div class="card-title-row">
+          <div>
+            <h2>Stock</h2>
+            <p>Actualiza únicamente stock de productos ya importados. No crea productos ni toca precio, descripción, imágenes o categorías.</p>
+          </div>
+        </div>
+        <div class="stock-sync-grid">
+          <form method="post" action="/admin/panel/stock/run-now?batch_limit=50&estado=importado" data-confirm-title="Sincronizar stock 50" data-confirm-text="Se consultará stock en GBP para 50 productos mapeados activos y se actualizarán solo variantes en Tienda Nube si cambió el stock. Con DRY_RUN=false escribe realmente." data-confirm-kind="primary">
+            <button class="btn primary" type="submit">Sync stock 50</button>
+          </form>
+          <form method="post" action="/admin/panel/stock/run-now?batch_limit=200&estado=importado" data-confirm-title="Sincronizar stock 200" data-confirm-text="Se consultará stock en GBP para 200 productos mapeados activos. Solo actualiza stock. Puede tardar varios minutos." data-confirm-kind="primary">
+            <button class="btn primary" type="submit">Sync stock 200</button>
+          </form>
+          <form class="stock-sku-form" method="post" action="/admin/panel/stock/run-sku?estado=importado" data-confirm-title="Sincronizar stock SKU" data-confirm-text="Se consultará GBP y se actualizará solo stock para el SKU indicado si tiene mapeo activo en Tienda Nube." data-confirm-kind="primary">
+            <input name="sku" placeholder="SKU stock" required>
+            <button class="btn secondary" type="submit">Sync SKU</button>
+          </form>
+        </div>
+      </article>
+
       <article class="control-card maintenance-card">
         <div class="card-title-row">
           <div>

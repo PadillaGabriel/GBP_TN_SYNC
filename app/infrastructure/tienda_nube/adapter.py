@@ -78,8 +78,13 @@ class TiendaNubeAdapter(PublicadorEcommerce):
                 mensaje="Producto sin variantes en Tienda Nube",
             )
 
+        product_id = str(existing["id"])
         variant_id = str(variants[0]["id"])
-        updated = await self.client.update_stock(variant_id, stock.cantidad)
+        updated = await self.client.update_variant_stock(
+            product_id=product_id,
+            variant_id=variant_id,
+            stock=stock.cantidad,
+        )
         return SyncResult(
             exitoso=True,
             accion="actualizar_stock",

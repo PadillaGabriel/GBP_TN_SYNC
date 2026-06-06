@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.application.jobs.bulk_jobs import ejecutar_job_auditar_todo, ejecutar_job_importar_todo
 from app.application.services.gbp_audit_service import GBPAuditService
 from app.application.services.tienda_nube_import_service import TiendaNubeImportService
+from app.application.services.stock_sync_service import StockSyncService
 from app.application.services.tienda_nube_category_service import TiendaNubeCategoryService
 from app.dependencies import get_db_session
 from app.infrastructure.persistence.repositories import (
@@ -49,6 +50,7 @@ def dashboard(db: Session = Depends(get_db_session)) -> dict[str, object]:
         "bloqueados_importados_tienda_nube": resumen["bloqueados_importados_tienda_nube"],
         "bloqueados_por_motivo": resumen["bloqueados_por_motivo"],
         "decisiones": productos.contar_por_decision(),
+        "stock_sync": productos.resumen_stock_sync(),
         "jobs": jobs.contar_por_estado(),
         "ultimo_evento": auditoria.obtener_ultimo_evento(),
     }
@@ -255,6 +257,7 @@ def panel_decisiones(
         "bloqueados_importados_tienda_nube": resumen["bloqueados_importados_tienda_nube"],
         "bloqueados_por_motivo": resumen["bloqueados_por_motivo"],
         "decisiones": productos.contar_por_decision(),
+        "stock_sync": productos.resumen_stock_sync(),
         "jobs": jobs.contar_por_estado(),
         "ultimo_evento": auditoria.obtener_ultimo_evento(),
     }
@@ -435,6 +438,51 @@ async def panel_importar_pendientes_tienda_nube(
         f"Creados: {result.get('creados', 0)}. "
         f"Actualizados: {result.get('actualizados', 0)}. "
         f"Errores: {result.get('errores', 0)}."
+    )
+    return _panel_redirect(estado, mensaje, q=q)
+
+
+
+
+@router.post("/panel/stock/run-now")
+async def panel_stock_run_now(
+    batch_limit: int = Query(default=100, ge=1, le=1000),
+    estado: str = Query(default="importado"),
+    q: str | None = Query(default=None),
+    db: Session = Depends(get_db_session),
+) -> RedirectResponse:
+    """Ejecuta sincronización manual de stock desde el panel."""
+
+    settings = get_settings()
+    service = StockSyncService(settings=settings, db=db)
+    result = await service.sincronizar_lote(limit=batch_limit)
+    mensaje = (
+        f"Stock sincronizado. Seleccionados: {result.get('seleccionados', 0)}. "
+        f"Actualizados: {result.get('actualizados', 0)}. "
+        f"Sin cambios: {result.get('sin_cambios', 0)}. "
+        f"Simulados: {result.get('simulados', 0)}. "
+        f"No consultables: {result.get('stock_no_consultable', 0)}. "
+        f"Errores: {result.get('errores', 0)}."
+    )
+    return _panel_redirect(estado, mensaje, q=q)
+
+
+@router.post("/panel/stock/run-sku")
+async def panel_stock_run_sku(
+    sku: str = Form(..., min_length=1),
+    estado: str = Query(default="importado"),
+    q: str | None = Query(default=None),
+    db: Session = Depends(get_db_session),
+) -> RedirectResponse:
+    """Sincroniza stock de un SKU puntual desde el panel."""
+
+    settings = get_settings()
+    service = StockSyncService(settings=settings, db=db)
+    result = await service.sincronizar_sku(sku=sku.strip())
+    mensaje = (
+        f"Stock SKU {sku}: {result.get('estado', '-')}. "
+        f"Anterior: {result.get('stock_anterior', '-')}. "
+        f"Nuevo: {result.get('stock_nuevo', '-')}"
     )
     return _panel_redirect(estado, mensaje, q=q)
 

@@ -147,6 +147,7 @@ h2 { font-size: 1rem; }
   grid-template-columns: minmax(0, 1.35fr) minmax(310px, 0.65fr);
   grid-template-areas:
     "filters sku"
+    "ops stock"
     "ops maintenance";
   gap: 1rem;
   margin-bottom: 1rem;
@@ -399,6 +400,7 @@ small,
       "filters"
       "sku"
       "ops"
+      "stock"
       "maintenance";
   }
 }
@@ -413,3 +415,12 @@ small,
   .action-grid { grid-template-columns: 1fr; }
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+.stock-card { grid-area: stock; }
+.stock-sync-grid,
+.stock-sku-form {
+  display: grid;
+  gap: 0.75rem;
+}
+.stock-sync-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); align-items: end; }
+.stock-sku-form { grid-template-columns: minmax(120px, 1fr) auto; }
