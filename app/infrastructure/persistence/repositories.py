@@ -461,7 +461,12 @@ class ProductoRepository:
         """Lista productos para gestionar decisiones operativas desde el panel."""
 
         query = (
-            select(ProductoFuenteModel, ProductoValidacionModel, ProductoTiendaNubeModel)
+            select(
+                ProductoFuenteModel,
+                ProductoValidacionModel,
+                ProductoTiendaNubeModel,
+                StockActualModel.stock_publicable_tn,
+            )
             .join(
                 ProductoValidacionModel,
                 ProductoValidacionModel.producto_fuente_id == ProductoFuenteModel.id,
@@ -470,6 +475,12 @@ class ProductoRepository:
             .join(
                 ProductoTiendaNubeModel,
                 ProductoTiendaNubeModel.sku == ProductoFuenteModel.sku,
+                isouter=True,
+            )
+            .join(
+                StockActualModel,
+                (StockActualModel.producto_fuente_id == ProductoFuenteModel.id)
+                & (StockActualModel.usado_para_tienda_nube.is_(True)),
                 isouter=True,
             )
         )
@@ -501,11 +512,6 @@ class ProductoRepository:
             ).where(
                 (ProductoValidacionModel.decision != "PUBLICABLE_AUTOMATICO")
                 | (StockActualModel.stock_publicable_tn <= 0)
-            ).join(
-                StockActualModel,
-                (StockActualModel.producto_fuente_id == ProductoFuenteModel.id)
-                & (StockActualModel.usado_para_tienda_nube.is_(True)),
-                isouter=True,
             )
         elif estado != "todos":
             query = query.where(ProductoValidacionModel.decision == estado)
@@ -528,7 +534,10 @@ class ProductoRepository:
         rows = self.db.execute(
             query.order_by(ProductoFuenteModel.updated_at.desc()).offset(offset).limit(limit)
         ).all()
-        return [self._to_decision_dict(producto, validacion, mapeo) for producto, validacion, mapeo in rows]
+        return [
+            self._to_decision_dict(producto, validacion, mapeo, stock_publicable)
+            for producto, validacion, mapeo, stock_publicable in rows
+        ]
 
     def _stock_publicable_tn(self, producto_id: int) -> int | None:
         """Devuelve stock publicable actual para Tienda Nube."""
@@ -545,10 +554,10 @@ class ProductoRepository:
         producto: ProductoFuenteModel,
         validacion: ProductoValidacionModel | None,
         mapeo: ProductoTiendaNubeModel | None,
+        stock_publicable: int | None,
     ) -> dict[str, object]:
         """Serializa un producto con acciones de decisión disponibles."""
 
-        stock_publicable = self._stock_publicable_tn(producto.id)
         decision = validacion.decision if validacion else "SIN_VALIDAR"
         tuvo_mapeo = mapeo is not None
         importado = self.es_mapeo_tienda_nube_activo(mapeo)

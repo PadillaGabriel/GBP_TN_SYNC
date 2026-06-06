@@ -1,5 +1,4 @@
 import logging
-from html import escape
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query, Request
@@ -216,188 +215,6 @@ def listar_depositos(db: Session = Depends(get_db_session)) -> dict[str, object]
     return {"items": depositos.listar()}
 
 
-def _safe(value: object) -> str:
-    """Escapa valores para render HTML simple sin motor de templates."""
-
-    if value is None:
-        return ""
-    return escape(str(value), quote=True)
-
-
-def _panel_redirect(estado: str, mensaje: str, q: str | None = None) -> RedirectResponse:
-    payload = {"estado": estado, "mensaje": mensaje}
-    if q:
-        payload["q"] = q
-    params = urlencode(payload)
-    return RedirectResponse(url=f"/admin/panel/decisiones?{params}", status_code=303)
-
-
-def _badge_class(decision: str) -> str:
-    if decision == "PUBLICABLE_AUTOMATICO":
-        return "ok"
-    if decision == "SIN_VALIDAR":
-        return "muted"
-    return "warn"
-
-
-def _render_panel_html(
-    *,
-    dashboard_data: dict[str, object],
-    items: list[dict[str, object]],
-    estado: str,
-    limit: int,
-    offset: int,
-    mensaje: str | None,
-) -> str:
-    settings = get_settings()
-    estados = [
-        ("requiere_revision", "Requiere revisión"),
-        ("bloqueado_importado", "Bloqueados importados"),
-        ("publicable_pendiente", "Publicables pendientes"),
-        ("importado", "Importados"),
-        ("bloqueado", "Bloqueados"),
-        ("todos", "Todos"),
-        ("NO_PUBLICAR_STOCK_SIN_DISPONIBLE", "Sin stock disponible"),
-        ("NO_PUBLICAR_SIN_DESCRIPCION_WEB", "Sin descripción web"),
-        ("PUBLICABLE_AUTOMATICO", "Publicables"),
-    ]
-    nav = "".join(
-        f'<a class="tab {"active" if key == estado else ""}" '
-        f'href="/admin/panel/decisiones?estado={_safe(key)}&limit={limit}">{_safe(label)}</a>'
-        for key, label in estados
-    )
-    cards = [
-        ("Ambiente", dashboard_data.get("app_env")),
-        ("DRY_RUN", dashboard_data.get("dry_run")),
-        ("Auditados", dashboard_data.get("productos_auditados")),
-        ("Mapeados TN", dashboard_data.get("productos_mapeados_tienda_nube")),
-        ("Publicables", dashboard_data.get("publicables_total")),
-        ("Pendientes", dashboard_data.get("publicables_pendientes_importar")),
-        ("Bloqueados", dashboard_data.get("bloqueados_total")),
-        ("Bloq. importados", dashboard_data.get("bloqueados_importados_tienda_nube")),
-    ]
-    card_html = "".join(
-        f'<div class="card"><span>{_safe(label)}</span><strong>{_safe(value)}</strong></div>'
-        for label, value in cards
-    )
-    alert = ""
-    if mensaje:
-        alert = f'<div class="notice">{_safe(mensaje)}</div>'
-    if not settings.dry_run:
-        alert += (
-            '<div class="danger">DRY_RUN=false. Las acciones Confirmar ocultar, Confirmar eliminar e Importar forzado '
-            'pueden escribir en Tienda Nube.</div>'
-        )
-
-    rows = []
-    for item in items:
-        sku = str(item.get("sku") or "")
-        decision = str(item.get("decision") or "")
-        motivos = item.get("motivos_bloqueo") or []
-        if isinstance(motivos, list):
-            motivos_text = ", ".join(str(m) for m in motivos if m)
-        else:
-            motivos_text = str(motivos)
-        requiere_revision = bool(item.get("requiere_revision"))
-        imported = bool(item.get("ya_importado_tienda_nube"))
-        actions = []
-        safe_sku = _safe(sku)
-        safe_estado = _safe(estado)
-        if imported:
-            actions.append(
-                f"""<form method="post" action="/admin/panel/decisiones/{safe_sku}/ocultar-tn?estado={safe_estado}" onsubmit="return confirm('Ocultar en Tienda Nube el SKU {safe_sku}');"><button class="secondary">Ocultar</button></form>"""
-            )
-            actions.append(
-                f"""<form method="post" action="/admin/panel/decisiones/{safe_sku}/eliminar-tn?estado={safe_estado}" onsubmit="return confirm('Eliminar en Tienda Nube el SKU {safe_sku}. Esta acción no borra la auditoría local.');"><button class="dangerbtn">Eliminar TN</button></form>"""
-            )
-        if (not imported) or decision != "PUBLICABLE_AUTOMATICO":
-            actions.append(
-                f"""<form method="post" action="/admin/panel/decisiones/{safe_sku}/importar-manual?estado={safe_estado}" onsubmit="return confirm('Importar manualmente forzado el SKU {safe_sku}');"><button>Importar forzado</button></form>"""
-            )
-        row_class = " class=\"review\"" if requiere_revision else ""
-        rows.append(
-            f"""<tr{row_class}>
-                <td><strong>{safe_sku}</strong><br><small>ID GBP: {_safe(item.get('id_sistema_gbp'))}</small></td>
-                <td>{_safe(item.get('titulo'))}<br><small>{_safe(item.get('categoria'))} / {_safe(item.get('subcategoria'))} / {_safe(item.get('marca'))}</small></td>
-                <td><span class="badge {_badge_class(decision)}">{_safe(decision)}</span><br><small>{_safe(motivos_text)}</small></td>
-                <td>{_safe(item.get('stock_publicable_tn'))}</td>
-                <td>{_safe(item.get('precio_importado'))}</td>
-                <td>{_safe(item.get('descripcion_largo'))}</td>
-                <td>{'Sí' if imported else 'No'}<br><small>{_safe(item.get('estado_publicacion'))}</small><br><small>TN: {_safe(item.get('tn_product_id'))}</small></td>
-                <td><div class="actions">{''.join(actions)}</div></td>
-            </tr>"""
-        )
-    rows_html = "".join(rows) or '<tr><td colspan="8" class="empty">Sin productos para este filtro.</td></tr>'
-    prev_offset = max(offset - limit, 0)
-    next_offset = offset + limit
-    return f"""<!doctype html>
-<html lang="es">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GBP TN Sync | Panel de decisiones</title>
-<style>
-:root {{ --bg:#0f1115; --panel:#171a21; --line:#2a2f3a; --text:#f1f3f5; --muted:#9aa4b2; --ok:#1f8f4d; --warn:#b7791f; --danger:#b42318; --blue:#2563eb; }}
-* {{ box-sizing:border-box; }}
-body {{ margin:0; font-family:Arial, Helvetica, sans-serif; background:var(--bg); color:var(--text); }}
-a {{ color:inherit; }}
-header {{ padding:24px; border-bottom:1px solid var(--line); background:#11141a; position:sticky; top:0; z-index:2; }}
-h1 {{ margin:0 0 8px 0; font-size:24px; }}
-.sub {{ color:var(--muted); font-size:14px; }}
-main {{ padding:24px; }}
-.cards {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:18px; }}
-.card {{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; }}
-.card span {{ display:block; color:var(--muted); font-size:12px; margin-bottom:8px; }}
-.card strong {{ font-size:22px; }}
-.tabs {{ display:flex; gap:8px; flex-wrap:wrap; margin:16px 0; }}
-.tab {{ text-decoration:none; padding:9px 12px; border:1px solid var(--line); border-radius:999px; color:var(--muted); background:var(--panel); font-size:13px; }}
-.tab.active {{ color:white; border-color:var(--blue); background:#172554; }}
-.notice {{ background:#102a43; border:1px solid #2b6cb0; padding:12px; border-radius:10px; margin:12px 0; }}
-.danger {{ background:#3b0d0c; border:1px solid var(--danger); padding:12px; border-radius:10px; margin:12px 0; }}
-.tablewrap {{ overflow:auto; border:1px solid var(--line); border-radius:14px; background:var(--panel); }}
-table {{ width:100%; border-collapse:collapse; min-width:1120px; }}
-th, td {{ padding:12px; border-bottom:1px solid var(--line); vertical-align:top; text-align:left; font-size:14px; }}
-th {{ color:var(--muted); background:#12151c; position:sticky; top:98px; z-index:1; }}
-small {{ color:var(--muted); }}
-tr.review {{ background:rgba(180,35,24,0.10); }}
-.badge {{ display:inline-block; padding:5px 8px; border-radius:999px; font-size:12px; font-weight:bold; }}
-.badge.ok {{ background:rgba(31,143,77,.18); color:#7ee2a8; }}
-.badge.warn {{ background:rgba(183,121,31,.18); color:#f6c56f; }}
-.badge.muted {{ background:rgba(154,164,178,.18); color:#cbd5e1; }}
-.actions {{ display:flex; gap:8px; flex-wrap:wrap; }}
-button {{ border:0; padding:8px 10px; border-radius:8px; background:var(--blue); color:white; cursor:pointer; font-weight:bold; }}
-button.secondary {{ background:#475569; }}
-button.dangerbtn {{ background:var(--danger); }}
-.pager {{ display:flex; gap:10px; margin-top:16px; }}
-.pager a {{ padding:10px 12px; background:var(--panel); border:1px solid var(--line); border-radius:8px; text-decoration:none; }}
-.empty {{ text-align:center; color:var(--muted); padding:32px; }}
-</style>
-</head>
-<body>
-<header>
-<h1>GBP → Tienda Nube | Panel de decisiones</h1>
-<div class="sub">Gestión visual de productos auditados, bloqueados, importados y acciones manuales. Servicio: /admin/panel/decisiones</div>
-</header>
-<main>
-{alert}
-<section class="cards">{card_html}</section>
-<nav class="tabs">{nav}</nav>
-<div class="tablewrap">
-<table>
-<thead><tr><th>SKU</th><th>Producto</th><th>Decisión</th><th>Stock TN</th><th>Precio</th><th>Descripción</th><th>Tienda Nube</th><th>Acciones</th></tr></thead>
-<tbody>{rows_html}</tbody>
-</table>
-</div>
-<div class="pager">
-<a href="/admin/panel/decisiones?estado={_safe(estado)}&limit={limit}&offset={prev_offset}">Anterior</a>
-<a href="/admin/panel/decisiones?estado={_safe(estado)}&limit={limit}&offset={next_offset}">Siguiente</a>
-<a href="/admin/dashboard">JSON dashboard</a>
-</div>
-</main>
-</body>
-</html>"""
-
-
 @router.get("/panel", response_class=HTMLResponse)
 def panel_home() -> RedirectResponse:
     """Entrada visual del panel administrativo."""
@@ -472,10 +289,6 @@ def panel_decisiones(
             "settings": settings,
         },
     )
-
-
-
-
 
 
 @router.post("/panel/jobs/auditar-todo")
@@ -662,8 +475,6 @@ def panel_marcar_mapeos_eliminados_externos(
         f"{result.get('mapeos_marcados_eliminado_externo', 0)}."
     )
     return _panel_redirect(estado, mensaje, q=q)
-
-
 
 
 @router.post("/panel/categorias/normalizar-duplicadas")
