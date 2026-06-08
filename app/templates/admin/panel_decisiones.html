@@ -31,6 +31,29 @@
       </section>
     {% endif %}
 
+
+    <section class="jobs-card">
+      <div class="card-title-row">
+        <div>
+          <h2>Procesos en segundo plano</h2>
+          <p>Últimas acciones ejecutadas. Podés cerrar el popup y volver a abrir el progreso desde acá.</p>
+        </div>
+        <button class="btn secondary" type="button" id="refresh-jobs">Actualizar procesos</button>
+      </div>
+      <div id="jobs-list" class="jobs-list">
+        {% for job in dashboard.jobs_activos %}
+          <button class="job-chip active" type="button" data-open-job="/admin/panel/jobs/{{ job.id }}">
+            #{{ job.id }} · {{ job.tipo }} · {{ job.estado }}
+          </button>
+        {% endfor %}
+        {% for job in dashboard.jobs_recientes %}
+          <button class="job-chip" type="button" data-open-job="/admin/panel/jobs/{{ job.id }}">
+            #{{ job.id }} · {{ job.tipo }} · {{ job.estado }}
+          </button>
+        {% endfor %}
+      </div>
+    </section>
+
     <section class="summary-grid" aria-label="Resumen operativo">
       <article class="summary-card"><span>Ambiente</span><strong>{{ dashboard.app_env }}</strong></article>
       <article class="summary-card {% if settings.dry_run %}safe{% else %}danger{% endif %}"><span>DRY_RUN</span><strong>{{ settings.dry_run }}</strong></article>
@@ -86,7 +109,7 @@
             <p>Consulta GBP en vivo y publica/actualiza un producto específico.</p>
           </div>
         </div>
-        <form class="sku-import-form" method="post" action="/admin/panel/importar-sku?estado=importado" data-confirm-title="Importar SKU puntual" data-confirm-text="Se buscará el SKU en GBP, se validará, se guardará localmente y se importará/actualizará en Tienda Nube. Si DRY_RUN=false escribirá realmente." data-confirm-kind="primary">
+        <form class="sku-import-form" method="post" data-async-job="true" action="/admin/panel/importar-sku?estado=importado" data-confirm-title="Importar SKU puntual" data-confirm-text="Se buscará el SKU en GBP, se validará, se guardará localmente y se importará/actualizará en Tienda Nube. Si DRY_RUN=false escribirá realmente." data-confirm-kind="primary">
           <input id="sku-import" name="sku" placeholder="Ej: 6130BL" required>
           <label class="checkbox-inline"><input type="checkbox" name="forzar" value="true"> Forzar si está bloqueado</label>
           <button class="btn primary" type="submit">Buscar e importar</button>
@@ -101,22 +124,28 @@
           </div>
         </div>
         <div class="action-grid">
-          <form method="post" action="/admin/panel/auditar-proximos?batch_limit=50&estado=publicable_pendiente" data-confirm-title="Auditar próximos 50" data-confirm-text="Se auditarán los próximos 50 productos con imagen Website que todavía no fueron auditados. No se crean productos en Tienda Nube." data-confirm-kind="secondary">
+          <form method="post" data-async-job="true" action="/admin/panel/auditar-proximos?batch_limit=50&estado=publicable_pendiente" data-confirm-title="Auditar próximos 50" data-confirm-text="Se auditarán los próximos 50 productos con imagen Website que todavía no fueron auditados. No se crean productos en Tienda Nube." data-confirm-kind="secondary">
             <button class="btn secondary" type="submit">Auditar próximos 50</button>
           </form>
-          <form method="post" action="/admin/panel/auditar-proximos?batch_limit=200&estado=publicable_pendiente" data-confirm-title="Auditar próximos 200" data-confirm-text="Se auditarán los próximos 200 productos no auditados. Este proceso puede tardar varios minutos." data-confirm-kind="secondary">
+          <form method="post" data-async-job="true" action="/admin/panel/auditar-proximos?batch_limit=200&estado=publicable_pendiente" data-confirm-title="Auditar próximos 200" data-confirm-text="Se auditarán los próximos 200 productos no auditados. Este proceso puede tardar varios minutos." data-confirm-kind="secondary">
             <button class="btn secondary" type="submit">Auditar próximos 200</button>
           </form>
           <form method="post" action="/admin/panel/jobs/auditar-todo?batch_limit=200&concurrency=3" data-async-job="true" data-confirm-title="Auditar todo" data-confirm-text="Se auditarán todos los productos GBP pendientes con imagen Website, por tandas, en segundo plano. No se crean productos en Tienda Nube." data-confirm-kind="secondary">
             <button class="btn secondary strong" type="submit">Auditar todo</button>
           </form>
-          <form method="post" action="/admin/panel/auditar-bloqueados-sin-descripcion?batch_limit=500&estado=publicable_pendiente" data-confirm-title="Reauditar sin descripción" data-confirm-text="Se volverán a consultar en GBP los productos bloqueados por falta de descripción. Sirve cuando ya cargaste descripciones nuevas en GBP." data-confirm-kind="secondary">
+          <form method="post" data-async-job="true" action="/admin/panel/auditar-bloqueados-sin-descripcion?batch_limit=500" data-confirm-title="Reauditar sin descripción" data-confirm-text="Se volverán a consultar en GBP los productos bloqueados por falta de descripción. El popup mostrará qué requisito sigue faltando y quedará asentado en auditoría." data-confirm-kind="secondary">
             <button class="btn secondary" type="submit">Reauditar sin descripción</button>
           </form>
-          <form method="post" action="/admin/panel/importar-pendientes?batch_limit=25&estado=importado" data-confirm-title="Importar pendientes" data-confirm-text="Se importarán hasta 25 productos publicables pendientes. Con DRY_RUN=false escribirá en Tienda Nube." data-confirm-kind="primary">
+          <form method="post" data-async-job="true" action="/admin/panel/auditar-bloqueados?decision=NO_PUBLICAR_STOCK_SIN_DISPONIBLE&batch_limit=500" data-confirm-title="Reauditar sin stock" data-confirm-text="Se volverán a consultar productos bloqueados por stock <= 0. El popup mostrará si pasaron a publicables o qué sigue faltando." data-confirm-kind="secondary">
+            <button class="btn secondary" type="submit">Reauditar sin stock</button>
+          </form>
+          <form method="post" data-async-job="true" action="/admin/panel/auditar-bloqueados?decision=NO_PUBLICAR_STOCK_NO_CONSULTABLE&batch_limit=500" data-confirm-title="Reauditar stock no consultable" data-confirm-text="Se volverán a consultar productos cuyo stock no era consultable y quedará detalle en auditoría." data-confirm-kind="secondary">
+            <button class="btn secondary" type="submit">Reauditar stock no consultable</button>
+          </form>
+          <form method="post" data-async-job="true" action="/admin/panel/importar-pendientes?batch_limit=25&estado=importado" data-confirm-title="Importar pendientes" data-confirm-text="Se importarán hasta 25 productos publicables pendientes. Con DRY_RUN=false escribirá en Tienda Nube." data-confirm-kind="primary">
             <button class="btn primary" type="submit">Importar pendientes 25</button>
           </form>
-          <form method="post" action="/admin/panel/importar-pendientes?batch_limit=50&estado=importado" data-confirm-title="Importar pendientes" data-confirm-text="Se importarán hasta 50 productos publicables pendientes. Con DRY_RUN=false escribirá en Tienda Nube." data-confirm-kind="primary">
+          <form method="post" data-async-job="true" action="/admin/panel/importar-pendientes?batch_limit=50&estado=importado" data-confirm-title="Importar pendientes" data-confirm-text="Se importarán hasta 50 productos publicables pendientes. Con DRY_RUN=false escribirá en Tienda Nube." data-confirm-kind="primary">
             <button class="btn primary" type="submit">Importar pendientes 50</button>
           </form>
           <form method="post" action="/admin/panel/jobs/importar-todo?batch_limit=50" data-async-job="true" data-confirm-title="Importar todo" data-confirm-text="Se importarán todos los productos publicables pendientes, por tandas, en segundo plano. Con DRY_RUN=false escribirá realmente en Tienda Nube." data-confirm-kind="danger">
@@ -133,13 +162,13 @@
           </div>
         </div>
         <div class="stock-sync-grid">
-          <form method="post" action="/admin/panel/stock/run-now?batch_limit=50&estado=importado" data-confirm-title="Sincronizar stock 50" data-confirm-text="Se consultará stock en GBP para 50 productos mapeados activos y se actualizarán solo variantes en Tienda Nube si cambió el stock. Con DRY_RUN=false escribe realmente." data-confirm-kind="primary">
+          <form method="post" data-async-job="true" action="/admin/panel/stock/run-now?batch_limit=50&estado=importado" data-confirm-title="Sincronizar stock 50" data-confirm-text="Se consultará stock en GBP para 50 productos mapeados activos y se actualizarán solo variantes en Tienda Nube si cambió el stock. Con DRY_RUN=false escribe realmente." data-confirm-kind="primary">
             <button class="btn primary" type="submit">Sync stock 50</button>
           </form>
-          <form method="post" action="/admin/panel/stock/run-now?batch_limit=200&estado=importado" data-confirm-title="Sincronizar stock 200" data-confirm-text="Se consultará stock en GBP para 200 productos mapeados activos. Solo actualiza stock. Puede tardar varios minutos." data-confirm-kind="primary">
+          <form method="post" data-async-job="true" action="/admin/panel/stock/run-now?batch_limit=200&estado=importado" data-confirm-title="Sincronizar stock 200" data-confirm-text="Se consultará stock en GBP para 200 productos mapeados activos. Solo actualiza stock. Puede tardar varios minutos." data-confirm-kind="primary">
             <button class="btn primary" type="submit">Sync stock 200</button>
           </form>
-          <form class="stock-sku-form" method="post" action="/admin/panel/stock/run-sku?estado=importado" data-confirm-title="Sincronizar stock SKU" data-confirm-text="Se consultará GBP y se actualizará solo stock para el SKU indicado si tiene mapeo activo en Tienda Nube." data-confirm-kind="primary">
+          <form class="stock-sku-form" method="post" data-async-job="true" action="/admin/panel/stock/run-sku?estado=importado" data-confirm-title="Sincronizar stock SKU" data-confirm-text="Se consultará GBP y se actualizará solo stock para el SKU indicado si tiene mapeo activo en Tienda Nube." data-confirm-kind="primary">
             <input name="sku" placeholder="SKU stock" required>
             <button class="btn secondary" type="submit">Sync SKU</button>
           </form>
@@ -157,7 +186,7 @@
           <form method="post" action="/admin/panel/decisiones/reconciliar-tn?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Reconciliar con Tienda Nube" data-confirm-text="Se verificará si los productos mapeados localmente siguen existiendo en Tienda Nube. No crea ni elimina publicaciones. Solo corrige estados locales." data-confirm-kind="secondary">
             <button class="btn secondary" type="submit">Reconciliar TN</button>
           </form>
-          <form method="post" action="/admin/panel/categorias/normalizar-duplicadas?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Normalizar categorías duplicadas" data-confirm-text="Se reasignarán productos a categorías canónicas y se intentará eliminar categorías duplicadas en Tienda Nube. Usar después de importaciones masivas o si el menú muestra categorías repetidas." data-confirm-kind="danger">
+          <form method="post" data-async-job="true" action="/admin/panel/categorias/normalizar-duplicadas?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Normalizar categorías duplicadas" data-confirm-text="Se reasignarán productos a categorías canónicas y se intentará eliminar categorías duplicadas en Tienda Nube. Usar después de importaciones masivas o si el menú muestra categorías repetidas." data-confirm-kind="danger">
             <button class="btn danger-outline" type="submit">Normalizar categorías</button>
           </form>
           <form method="post" action="/admin/panel/decisiones/mapeos/marcar-eliminados-externos?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Marcar mapeos como eliminados externos" data-confirm-text="Usar solo si ya eliminaste manualmente las publicaciones en Tienda Nube. Los mapeos locales pasarán a eliminado_externo y esos SKUs podrán importarse nuevamente si siguen publicables." data-confirm-kind="danger">

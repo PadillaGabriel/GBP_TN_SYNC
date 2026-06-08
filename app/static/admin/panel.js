@@ -9,14 +9,24 @@
   const progressDetails = document.getElementById('progress-details');
   const progressBar = document.getElementById('progress-bar');
   const progressClose = document.getElementById('progress-close');
+  const refreshJobsButton = document.getElementById('refresh-jobs');
+  const jobsList = document.getElementById('jobs-list');
+
   let pendingForm = null;
   let pollingTimer = null;
-
+  let currentStatusUrl = null;
   const terminalStates = new Set(['FINALIZADO', 'FINALIZADO_CON_ERRORES', 'ERROR', 'CANCELADO']);
 
   function showProgress() {
     if (progressModal && typeof progressModal.showModal === 'function' && !progressModal.open) {
       progressModal.showModal();
+    }
+  }
+
+  function stopPolling() {
+    if (pollingTimer) {
+      clearInterval(pollingTimer);
+      pollingTimer = null;
     }
   }
 
@@ -37,8 +47,8 @@
       setProgress(data);
       const state = data?.job?.estado;
       if (terminalStates.has(state)) {
-        clearInterval(pollingTimer);
-        pollingTimer = null;
+        stopPolling();
+        await refreshJobs();
         return;
       }
     } catch (error) {
@@ -46,10 +56,24 @@
     }
   }
 
+  async function openJob(statusUrl) {
+    stopPolling();
+    currentStatusUrl = statusUrl;
+    showProgress();
+    progressTitle.textContent = 'Cargando proceso...';
+    progressStatus.textContent = 'Consultando estado persistido.';
+    progressBar.style.width = '1%';
+    await pollJob(statusUrl);
+    pollingTimer = setInterval(() => pollJob(statusUrl), 2500);
+  }
+
   async function startAsyncJob(form) {
+    stopPolling();
+    const body = new FormData(form);
     const response = await fetch(form.action, {
       method: 'POST',
       headers: { Accept: 'application/json' },
+      body,
     });
     const data = await response.json();
     if (!data.ok) {
@@ -60,20 +84,38 @@
       return;
     }
     progressTitle.textContent = `${data.tipo || 'Job'} #${data.job_id}`;
-    progressStatus.textContent = 'Proceso iniciado. Consultando progreso...';
+    progressStatus.textContent = 'Proceso iniciado en segundo plano. Consultando progreso...';
     progressDetails.textContent = JSON.stringify(data, null, 2);
     progressBar.style.width = '1%';
     showProgress();
-    const statusUrl = data.status_url;
-    await pollJob(statusUrl);
-    pollingTimer = setInterval(() => pollJob(statusUrl), 2500);
+    await refreshJobs();
+    await openJob(data.status_url);
+  }
+
+  async function refreshJobs() {
+    if (!jobsList) return;
+    try {
+      const response = await fetch('/admin/panel/jobs', { headers: { Accept: 'application/json' } });
+      const data = await response.json();
+      if (!data.ok) return;
+      const seen = new Set();
+      const jobs = [...(data.activos || []), ...(data.recientes || [])].filter((job) => {
+        if (seen.has(job.id)) return false;
+        seen.add(job.id);
+        return true;
+      });
+      jobsList.innerHTML = jobs.map((job) => {
+        const active = ['PENDIENTE', 'EN_PROCESO'].includes(job.estado) ? ' active' : '';
+        return `<button class="job-chip${active}" type="button" data-open-job="/admin/panel/jobs/${job.id}">#${job.id} · ${job.tipo} · ${job.estado}</button>`;
+      }).join('') || '<span class="muted-text">Sin procesos recientes.</span>';
+    } catch (_error) {
+      // El panel no debe romperse por no poder refrescar la lista de jobs.
+    }
   }
 
   document.querySelectorAll('form[data-confirm-title]').forEach((form) => {
     form.addEventListener('submit', (event) => {
-      if (!modal || typeof modal.showModal !== 'function') {
-        return;
-      }
+      if (!modal || typeof modal.showModal !== 'function') return;
       event.preventDefault();
       pendingForm = form;
       title.textContent = form.dataset.confirmTitle || 'Confirmar acción';
@@ -96,15 +138,25 @@
     form.submit();
   });
 
+  document.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-open-job]');
+    if (!button) return;
+    event.preventDefault();
+    await openJob(button.dataset.openJob);
+  });
+
+  refreshJobsButton?.addEventListener('click', refreshJobs);
+
   modal?.addEventListener('close', () => {
     pendingForm = null;
   });
 
   progressClose?.addEventListener('click', () => {
-    if (pollingTimer) {
-      clearInterval(pollingTimer);
-      pollingTimer = null;
-    }
+    stopPolling();
+    currentStatusUrl = null;
     progressModal?.close();
   });
+
+  // Si hay procesos activos al abrir el panel, refrescar la lista sin tocar el popup.
+  refreshJobs();
 })();

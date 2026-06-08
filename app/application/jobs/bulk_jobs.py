@@ -4,6 +4,8 @@ import logging
 from typing import Any
 
 from app.application.services.gbp_audit_service import GBPAuditService
+from app.application.services.stock_sync_service import StockSyncService
+from app.application.services.tienda_nube_category_service import TiendaNubeCategoryService
 from app.application.services.tienda_nube_import_service import TiendaNubeImportService
 from app.infrastructure.persistence.database import SessionLocal
 from app.infrastructure.persistence.repositories import ProductoRepository, SyncAuditRepository, SyncJobRepository
@@ -283,3 +285,283 @@ async def ejecutar_job_importar_todo(
                 "porcentaje": _percent(total_procesados, max(total_inicial, 1)),
             },
         )
+
+
+async def ejecutar_job_auditar_proximos(
+    *,
+    job_id: int,
+    batch_limit: int = 200,
+    concurrency: int = 3,
+) -> None:
+    """Audita una tanda incremental con progreso visible."""
+
+    settings = get_settings()
+    try:
+        _update_job(
+            job_id,
+            estado="EN_PROCESO",
+            progreso={"mensaje": "Auditando próximos productos.", "porcentaje": 5, "batch_limit": batch_limit},
+            finalizar=False,
+        )
+        with SessionLocal() as db:
+            SyncJobRepository(db).actualizar(job_id, iniciar=True)
+            service = GBPAuditService(settings=settings, db=db)
+            result = await service.ejecutar_auditoria_productos(
+                limit=batch_limit,
+                concurrency=concurrency,
+                guardar_en_db=True,
+                solo_no_auditados=True,
+            )
+            SyncAuditRepository(db).registrar(
+                sku=None,
+                accion="JOB_AUDITAR_PROXIMOS",
+                estado="OK" if int(result.get("errores") or 0) == 0 else "OK_CON_ERRORES",
+                mensaje=(
+                    f"procesados={result.get('procesados', 0)} publicables={result.get('publicables', 0)} "
+                    f"bloqueados={result.get('bloqueados', 0)} errores={result.get('errores', 0)} "
+                    f"pendientes={result.get('candidatos_pendientes_auditar', 0)}"
+                ),
+                metodo_gbp="GBPAuditService.ejecutar_auditoria_productos incremental",
+                duracion_ms=int(result.get("duration_ms") or 0),
+            )
+        _update_job(
+            job_id,
+            estado="FINALIZADO",
+            finalizar=True,
+            progreso={
+                "mensaje": "Auditoría incremental finalizada.",
+                "porcentaje": 100,
+                "procesados": int(result.get("procesados") or 0),
+                "publicables": int(result.get("publicables") or 0),
+                "bloqueados": int(result.get("bloqueados") or 0),
+                "errores": int(result.get("errores") or 0),
+                "errores_persistencia": int(result.get("errores_persistencia") or 0),
+                "pendientes_por_auditar": int(result.get("candidatos_pendientes_auditar") or 0),
+                "decisiones": result.get("decisiones") or {},
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("job_auditar_proximos_failed", extra={"job_id": job_id})
+        _update_job(job_id, estado="ERROR", finalizar=True, error_codigo=type(exc).__name__, progreso={"mensaje": str(exc), "porcentaje": 100})
+
+
+async def ejecutar_job_importar_pendientes(
+    *,
+    job_id: int,
+    batch_limit: int = 25,
+) -> None:
+    """Importa una tanda de publicables pendientes con progreso visible."""
+
+    settings = get_settings()
+    try:
+        with SessionLocal() as db:
+            SyncJobRepository(db).actualizar(
+                job_id,
+                estado="EN_PROCESO",
+                iniciar=True,
+                progreso={"mensaje": "Importando pendientes.", "porcentaje": 5, "batch_limit": batch_limit, "dry_run": settings.dry_run},
+            )
+            service = TiendaNubeImportService(settings=settings, db=db)
+            result = await service.importar_prueba_tienda_nube(limit=batch_limit, confirm=True)
+        _update_job(
+            job_id,
+            estado="FINALIZADO" if int(result.get("errores") or 0) == 0 else "FINALIZADO_CON_ERRORES",
+            finalizar=True,
+            progreso={
+                "mensaje": "Importación de pendientes finalizada.",
+                "porcentaje": 100,
+                "seleccionados": int(result.get("seleccionados") or 0),
+                "procesados": int(result.get("procesados") or 0),
+                "creados": int(result.get("creados") or 0),
+                "actualizados": int(result.get("actualizados") or 0),
+                "bloqueados": int(result.get("bloqueados") or 0),
+                "errores": int(result.get("errores") or 0),
+                "duration_ms": int(result.get("duration_ms") or 0),
+                "resultados_muestra": result.get("resultados") or {},
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("job_importar_pendientes_failed", extra={"job_id": job_id})
+        _update_job(job_id, estado="ERROR", finalizar=True, error_codigo=type(exc).__name__, progreso={"mensaje": str(exc), "porcentaje": 100})
+
+
+async def ejecutar_job_importar_sku(
+    *,
+    job_id: int,
+    sku: str,
+    forzar: bool = False,
+) -> None:
+    """Consulta GBP en vivo e importa/actualiza un SKU con progreso visible."""
+
+    settings = get_settings()
+    try:
+        with SessionLocal() as db:
+            SyncJobRepository(db).actualizar(
+                job_id,
+                estado="EN_PROCESO",
+                iniciar=True,
+                progreso={"mensaje": f"Consultando e importando SKU {sku}.", "porcentaje": 10, "sku": sku, "forzar": forzar},
+            )
+            service = TiendaNubeImportService(settings=settings, db=db)
+            result = await service.importar_producto_manual_tienda_nube(sku=sku, confirm=True, forzar=forzar)
+        estado = "FINALIZADO" if result.get("ok") else "FINALIZADO_CON_ERRORES"
+        _update_job(
+            job_id,
+            estado=estado,
+            finalizar=True,
+            progreso={
+                "mensaje": f"SKU {sku}: {result.get('estado', '-')}",
+                "porcentaje": 100,
+                "sku": sku,
+                "decision": result.get("decision"),
+                "motivos": result.get("motivos") or [],
+                "accion": result.get("accion"),
+                "tn_product_id": result.get("tn_product_id"),
+                "tn_variant_id": result.get("tn_variant_id"),
+                "precio": result.get("precio"),
+                "stock": result.get("stock"),
+                "descripcion_largo": result.get("descripcion_largo"),
+                "ejecuta_tienda_nube": result.get("ejecuta_tienda_nube"),
+                "dry_run": result.get("dry_run"),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("job_importar_sku_failed", extra={"job_id": job_id, "sku": sku})
+        _update_job(job_id, estado="ERROR", finalizar=True, error_codigo=type(exc).__name__, progreso={"mensaje": str(exc), "porcentaje": 100, "sku": sku})
+
+
+async def ejecutar_job_stock_lote(
+    *,
+    job_id: int,
+    batch_limit: int = 100,
+) -> None:
+    """Sincroniza stock de una tanda con progreso visible."""
+
+    settings = get_settings()
+    try:
+        with SessionLocal() as db:
+            SyncJobRepository(db).actualizar(job_id, estado="EN_PROCESO", iniciar=True, progreso={"mensaje": "Sincronizando stock.", "porcentaje": 5, "batch_limit": batch_limit})
+            service = StockSyncService(settings=settings, db=db)
+            result = await service.sincronizar_lote(limit=batch_limit)
+        _update_job(job_id, estado="FINALIZADO" if int(result.get("errores") or 0) == 0 else "FINALIZADO_CON_ERRORES", finalizar=True, progreso={**result, "mensaje": "Sincronización de stock finalizada.", "porcentaje": 100})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("job_stock_lote_failed", extra={"job_id": job_id})
+        _update_job(job_id, estado="ERROR", finalizar=True, error_codigo=type(exc).__name__, progreso={"mensaje": str(exc), "porcentaje": 100})
+
+
+async def ejecutar_job_stock_sku(
+    *,
+    job_id: int,
+    sku: str,
+) -> None:
+    """Sincroniza stock de un SKU con progreso visible."""
+
+    settings = get_settings()
+    try:
+        with SessionLocal() as db:
+            SyncJobRepository(db).actualizar(job_id, estado="EN_PROCESO", iniciar=True, progreso={"mensaje": f"Sincronizando stock SKU {sku}.", "porcentaje": 10, "sku": sku})
+            service = StockSyncService(settings=settings, db=db)
+            result = await service.sincronizar_sku(sku=sku)
+        _update_job(job_id, estado="FINALIZADO" if result.get("estado") != "ERROR" else "FINALIZADO_CON_ERRORES", finalizar=True, progreso={**result, "mensaje": f"Stock SKU {sku}: {result.get('estado', '-')}", "porcentaje": 100})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("job_stock_sku_failed", extra={"job_id": job_id, "sku": sku})
+        _update_job(job_id, estado="ERROR", finalizar=True, error_codigo=type(exc).__name__, progreso={"mensaje": str(exc), "porcentaje": 100, "sku": sku})
+
+
+async def ejecutar_job_normalizar_categorias(
+    *,
+    job_id: int,
+    confirm: bool = True,
+) -> None:
+    """Normaliza categorías duplicadas con progreso visible."""
+
+    settings = get_settings()
+    try:
+        with SessionLocal() as db:
+            SyncJobRepository(db).actualizar(job_id, estado="EN_PROCESO", iniciar=True, progreso={"mensaje": "Normalizando categorías duplicadas.", "porcentaje": 10})
+            service = TiendaNubeCategoryService(settings=settings, audit_repo=SyncAuditRepository(db))
+            result = await service.normalizar_categorias_duplicadas(confirm=confirm)
+        errores = len(result.get("errores_productos", [])) + len(result.get("errores_eliminacion", []))
+        _update_job(job_id, estado="FINALIZADO" if errores == 0 else "FINALIZADO_CON_ERRORES", finalizar=True, progreso={**result, "mensaje": "Normalización de categorías finalizada.", "errores": errores, "porcentaje": 100})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("job_normalizar_categorias_failed", extra={"job_id": job_id})
+        _update_job(job_id, estado="ERROR", finalizar=True, error_codigo=type(exc).__name__, progreso={"mensaje": str(exc), "porcentaje": 100})
+
+
+async def ejecutar_job_reauditar_decision(
+    *,
+    job_id: int,
+    decision: str,
+    batch_limit: int = 200,
+) -> None:
+    """Reconsulta GBP para productos bloqueados por una decisión y deja detalle persistido."""
+
+    settings = get_settings()
+    total = 0
+    publicables = 0
+    siguen_bloqueados = 0
+    errores = 0
+    detalle: list[dict[str, object]] = []
+    try:
+        with SessionLocal() as db:
+            repo = ProductoRepository(db)
+            skus = repo.listar_skus_por_decision(decision, limit=batch_limit)
+            total_estimado = len(skus)
+            SyncJobRepository(db).actualizar(job_id, estado="EN_PROCESO", iniciar=True, progreso={"mensaje": f"Reauditando {decision}.", "porcentaje": 0, "total": total_estimado})
+
+        for sku in skus:
+            try:
+                with SessionLocal() as db:
+                    service = TiendaNubeImportService(settings=settings, db=db)
+                    result = await service.importar_producto_manual_tienda_nube(sku=sku, confirm=False, forzar=False)
+                    SyncAuditRepository(db).registrar(
+                        sku=sku,
+                        accion="REAUDITAR_BLOQUEADO",
+                        estado="OK" if result.get("ok") else "ERROR",
+                        mensaje=(
+                            f"decision_anterior={decision} decision_nueva={result.get('decision')} "
+                            f"motivos={result.get('motivos', [])} stock={result.get('stock')} "
+                            f"precio={result.get('precio')} descripcion_largo={result.get('descripcion_largo')}"
+                        ),
+                        metodo_gbp="TiendaNubeImportService.importar_producto_manual_tienda_nube(confirm=False)",
+                        duracion_ms=int(result.get("duration_ms") or 0),
+                    )
+                total += 1
+                if result.get("decision") == "PUBLICABLE_AUTOMATICO":
+                    publicables += 1
+                else:
+                    siguen_bloqueados += 1
+                if len(detalle) < 30:
+                    detalle.append({
+                        "sku": sku,
+                        "decision_nueva": result.get("decision"),
+                        "motivos": result.get("motivos") or [],
+                        "stock": result.get("stock"),
+                        "precio": result.get("precio"),
+                        "descripcion_largo": result.get("descripcion_largo"),
+                    })
+            except Exception as exc:  # noqa: BLE001
+                errores += 1
+                if len(detalle) < 30:
+                    detalle.append({"sku": sku, "error": f"{type(exc).__name__}: {exc}"})
+            _update_job(job_id, estado="EN_PROCESO", progreso={
+                "mensaje": f"Reauditando {decision}.",
+                "porcentaje": _percent(total + errores, max(total_estimado, 1)),
+                "procesados": total,
+                "publicables": publicables,
+                "siguen_bloqueados": siguen_bloqueados,
+                "errores": errores,
+                "detalle_muestra": detalle,
+            })
+        _update_job(job_id, estado="FINALIZADO" if errores == 0 else "FINALIZADO_CON_ERRORES", finalizar=True, progreso={
+            "mensaje": f"Reauditoría {decision} finalizada.",
+            "porcentaje": 100,
+            "procesados": total,
+            "publicables": publicables,
+            "siguen_bloqueados": siguen_bloqueados,
+            "errores": errores,
+            "detalle_muestra": detalle,
+        })
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("job_reauditar_decision_failed", extra={"job_id": job_id, "decision": decision})
+        _update_job(job_id, estado="ERROR", finalizar=True, error_codigo=type(exc).__name__, progreso={"mensaje": str(exc), "porcentaje": 100})

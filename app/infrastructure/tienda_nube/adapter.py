@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 import unicodedata
 from typing import Any
@@ -15,6 +16,8 @@ from app.infrastructure.tienda_nube.payload_builder import TiendaNubePayloadBuil
 
 class TiendaNubeAdapter(PublicadorEcommerce):
     """Adaptador de Tienda Nube hacia contrato interno."""
+
+    _category_lock = asyncio.Lock()
 
     def __init__(
         self,
@@ -94,29 +97,36 @@ class TiendaNubeAdapter(PublicadorEcommerce):
         )
 
     async def _ensure_category_tree(self, producto: Producto) -> list[int]:
-        """Asegura categoria y subcategoria en Tienda Nube y devuelve IDs para el producto."""
+        """Asegura categoria y subcategoria sin duplicar por concurrencia.
 
-        categoria = self._clean_category_name(producto.categoria_nombre)
-        subcategoria = self._clean_category_name(producto.subcategoria_nombre)
-        if not categoria:
-            return []
+        El lock evita que importaciones simultáneas consulten el árbol viejo y creen
+        la misma categoría en paralelo. La normalización preventiva ocurre antes
+        de cada creación; la función correctiva queda como última instancia.
+        """
 
-        categories = await self.client.list_categories()
-        parent = self._find_category(categories, name=categoria, parent_id=None)
-        if parent is None:
-            parent = await self.client.create_category({"name": {"es": categoria}})
-            categories.append(parent)
+        async with self._category_lock:
+            categoria = self._clean_category_name(producto.categoria_nombre)
+            subcategoria = self._clean_category_name(producto.subcategoria_nombre)
+            if not categoria:
+                return []
 
-        parent_id = self._extract_id(parent)
-        if parent_id is None or not subcategoria:
-            return [parent_id] if parent_id is not None else []
+            categories = await self.client.list_categories()
+            categories = sorted(categories, key=lambda item: int(item.get("id") or 0))
+            parent = self._find_category(categories, name=categoria, parent_id=None)
+            if parent is None:
+                parent = await self.client.create_category({"name": {"es": categoria}})
+                categories.append(parent)
 
-        child = self._find_category(categories, name=subcategoria, parent_id=parent_id)
-        if child is None:
-            child = await self.client.create_category({"name": {"es": subcategoria}, "parent": parent_id})
+            parent_id = self._extract_id(parent)
+            if parent_id is None or not subcategoria:
+                return [parent_id] if parent_id is not None else []
 
-        child_id = self._extract_id(child)
-        return [parent_id, child_id] if child_id is not None else [parent_id]
+            child = self._find_category(categories, name=subcategoria, parent_id=parent_id)
+            if child is None:
+                child = await self.client.create_category({"name": {"es": subcategoria}, "parent": parent_id})
+
+            child_id = self._extract_id(child)
+            return [parent_id, child_id] if child_id is not None else [parent_id]
 
     @classmethod
     def _find_category(

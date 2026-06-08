@@ -424,3 +424,41 @@ small,
 }
 .stock-sync-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); align-items: end; }
 .stock-sku-form { grid-template-columns: minmax(120px, 1fr) auto; }
+
+.jobs-card {
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 18px;
+  padding: 18px;
+  margin: 18px 0;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+}
+
+.jobs-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.job-chip {
+  border: 1px solid #d6d9e0;
+  background: #f8fafc;
+  color: #1f2937;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.job-chip.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.muted-text {
+  color: #6b7280;
+  font-size: 13px;
+}

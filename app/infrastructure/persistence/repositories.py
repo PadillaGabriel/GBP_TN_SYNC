@@ -976,6 +976,28 @@ class SyncJobRepository:
 
         return self.serializar(self.obtener(job_id))
 
+
+    def listar_recientes(self, limit: int = 12) -> list[dict[str, object]]:
+        """Lista jobs recientes para recuperar popups de progreso desde el panel."""
+
+        rows = self.db.scalars(
+            select(SyncJobModel)
+            .order_by(SyncJobModel.created_at.desc().nullslast(), SyncJobModel.id.desc())
+            .limit(limit)
+        ).all()
+        return [item for item in (self.serializar(job) for job in rows) if item is not None]
+
+    def listar_activos(self, limit: int = 12) -> list[dict[str, object]]:
+        """Lista jobs no terminales para saber qué sigue ejecutándose."""
+
+        rows = self.db.scalars(
+            select(SyncJobModel)
+            .where(SyncJobModel.estado.in_(("PENDIENTE", "EN_PROCESO")))
+            .order_by(SyncJobModel.created_at.desc().nullslast(), SyncJobModel.id.desc())
+            .limit(limit)
+        ).all()
+        return [item for item in (self.serializar(job) for job in rows) if item is not None]
+
     def contar_por_estado(self) -> dict[str, int]:
         """Cuenta jobs por estado."""
 

@@ -6,7 +6,17 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from app.application.jobs.bulk_jobs import ejecutar_job_auditar_todo, ejecutar_job_importar_todo
+from app.application.jobs.bulk_jobs import (
+    ejecutar_job_auditar_proximos,
+    ejecutar_job_auditar_todo,
+    ejecutar_job_importar_pendientes,
+    ejecutar_job_importar_sku,
+    ejecutar_job_importar_todo,
+    ejecutar_job_normalizar_categorias,
+    ejecutar_job_reauditar_decision,
+    ejecutar_job_stock_lote,
+    ejecutar_job_stock_sku,
+)
 from app.application.services.gbp_audit_service import GBPAuditService
 from app.application.services.tienda_nube_import_service import TiendaNubeImportService
 from app.application.services.stock_sync_service import StockSyncService
@@ -23,6 +33,37 @@ from app.settings import get_settings
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory="app/templates")
 logger = logging.getLogger(__name__)
+
+
+def _panel_redirect(
+    estado: str = "requiere_revision",
+    mensaje: str | None = None,
+    *,
+    q: str | None = None,
+    limit: int | None = None,
+    offset: int | None = None,
+) -> RedirectResponse:
+    """Redirige al panel visual preservando filtros seguros.
+
+    Centraliza las acciones POST del panel para evitar duplicar armado de URLs
+    y para que un error en operaciones de mantenimiento no termine en 500 por
+    falta de redirección.
+    """
+
+    params: dict[str, str | int] = {"estado": estado or "requiere_revision"}
+    if limit is not None:
+        params["limit"] = limit
+    if offset is not None:
+        params["offset"] = offset
+    if q:
+        params["q"] = q
+    if mensaje:
+        params["mensaje"] = mensaje
+
+    return RedirectResponse(
+        url=f"/admin/panel/decisiones?{urlencode(params)}",
+        status_code=303,
+    )
 
 
 @router.get("/dashboard")
@@ -52,6 +93,8 @@ def dashboard(db: Session = Depends(get_db_session)) -> dict[str, object]:
         "decisiones": productos.contar_por_decision(),
         "stock_sync": productos.resumen_stock_sync(),
         "jobs": jobs.contar_por_estado(),
+        "jobs_recientes": jobs.listar_recientes(limit=10),
+        "jobs_activos": jobs.listar_activos(limit=10),
         "ultimo_evento": auditoria.obtener_ultimo_evento(),
     }
 
@@ -259,6 +302,8 @@ def panel_decisiones(
         "decisiones": productos.contar_por_decision(),
         "stock_sync": productos.resumen_stock_sync(),
         "jobs": jobs.contar_por_estado(),
+        "jobs_recientes": jobs.listar_recientes(limit=10),
+        "jobs_activos": jobs.listar_activos(limit=10),
         "ultimo_evento": auditoria.obtener_ultimo_evento(),
     }
     estados = [
@@ -368,123 +413,98 @@ def panel_obtener_job(job_id: int, db: Session = Depends(get_db_session)) -> JSO
     return JSONResponse({"ok": True, "job": data})
 
 
+@router.get("/panel/jobs")
+def panel_listar_jobs(db: Session = Depends(get_db_session)) -> JSONResponse:
+    """Lista jobs recientes y activos para recuperar popups desde el panel."""
+
+    repo = SyncJobRepository(db)
+    return JSONResponse({"ok": True, "activos": repo.listar_activos(limit=12), "recientes": repo.listar_recientes(limit=12)})
+
+
 @router.post("/panel/importar-sku")
 async def panel_importar_sku_directo(
+    background_tasks: BackgroundTasks,
     sku: str = Form(..., min_length=1),
     forzar: bool = Form(default=False),
-    estado: str = Query(default="importado"),
-    q: str | None = Query(default=None),
     db: Session = Depends(get_db_session),
-) -> RedirectResponse:
-    """Busca un SKU en GBP y lo importa/actualiza en Tienda Nube desde el panel."""
+) -> JSONResponse:
+    """Busca un SKU en GBP y lo importa/actualiza en Tienda Nube como job visible."""
 
-    settings = get_settings()
-    service = TiendaNubeImportService(settings=settings, db=db)
-    result = await service.importar_producto_manual_tienda_nube(
-        sku=sku.strip(),
-        confirm=True,
-        forzar=forzar,
+    clean_sku = sku.strip()
+    job = SyncJobRepository(db).crear(
+        tipo="IMPORTAR_SKU_TN",
+        sku=clean_sku,
+        progreso={"mensaje": f"Job creado para importar SKU {clean_sku}.", "sku": clean_sku, "porcentaje": 0},
     )
-    mensaje = (
-        f"SKU {sku}: {result.get('estado')}. "
-        f"Acción: {result.get('accion', 'consulta/importación SKU')}. "
-        f"Decisión: {result.get('decision', '-')}."
-    )
-    return _panel_redirect(estado, mensaje, q=q)
+    background_tasks.add_task(ejecutar_job_importar_sku, job_id=job.id, sku=clean_sku, forzar=forzar)
+    return JSONResponse({"ok": True, "job_id": job.id, "tipo": job.tipo, "status_url": f"/admin/panel/jobs/{job.id}"})
 
 
 @router.post("/panel/auditar-proximos")
 async def panel_auditar_proximos_productos(
+    background_tasks: BackgroundTasks,
     batch_limit: int = Query(default=200, ge=1, le=1000),
     concurrency: int = Query(default=3, ge=1, le=10),
-    estado: str = Query(default="publicable_pendiente"),
-    q: str | None = Query(default=None),
     db: Session = Depends(get_db_session),
-) -> RedirectResponse:
-    """Acción visual: audita próximos productos no auditados, sin repetir desde el inicio."""
+) -> JSONResponse:
+    """Audita próximos productos como job visible."""
 
-    settings = get_settings()
-    service = GBPAuditService(settings=settings, db=db)
-    result = await service.ejecutar_auditoria_productos(
-        limit=batch_limit,
-        concurrency=concurrency,
-        guardar_en_db=True,
-        solo_no_auditados=True,
+    job = SyncJobRepository(db).crear(
+        tipo="AUDITAR_PROXIMOS_GBP",
+        progreso={"mensaje": "Job creado para auditoría incremental.", "batch_limit": batch_limit, "porcentaje": 0},
     )
-    mensaje = (
-        f"Auditoría incremental finalizada. Procesados: {result.get('procesados', 0)}. "
-        f"Publicables: {result.get('publicables', 0)}. "
-        f"Bloqueados: {result.get('bloqueados', 0)}. "
-        f"Pendientes por auditar: {result.get('candidatos_pendientes_auditar', 0)}."
-    )
-    return _panel_redirect(estado, mensaje, q=q)
+    background_tasks.add_task(ejecutar_job_auditar_proximos, job_id=job.id, batch_limit=batch_limit, concurrency=concurrency)
+    return JSONResponse({"ok": True, "job_id": job.id, "tipo": job.tipo, "status_url": f"/admin/panel/jobs/{job.id}"})
 
 
 @router.post("/panel/importar-pendientes")
 async def panel_importar_pendientes_tienda_nube(
+    background_tasks: BackgroundTasks,
     batch_limit: int = Query(default=25, ge=1, le=200),
-    estado: str = Query(default="importado"),
-    q: str | None = Query(default=None),
     db: Session = Depends(get_db_session),
-) -> RedirectResponse:
-    """Acción visual: importa productos publicables pendientes respetando reglas automáticas."""
+) -> JSONResponse:
+    """Importa pendientes como job visible."""
 
-    settings = get_settings()
-    service = TiendaNubeImportService(settings=settings, db=db)
-    result = await service.importar_prueba_tienda_nube(limit=batch_limit, confirm=True)
-    mensaje = (
-        f"Importación finalizada. Seleccionados: {result.get('seleccionados', 0)}. "
-        f"Procesados: {result.get('procesados', 0)}. "
-        f"Creados: {result.get('creados', 0)}. "
-        f"Actualizados: {result.get('actualizados', 0)}. "
-        f"Errores: {result.get('errores', 0)}."
+    job = SyncJobRepository(db).crear(
+        tipo="IMPORTAR_PENDIENTES_TN",
+        progreso={"mensaje": "Job creado para importar pendientes.", "batch_limit": batch_limit, "porcentaje": 0},
     )
-    return _panel_redirect(estado, mensaje, q=q)
-
-
+    background_tasks.add_task(ejecutar_job_importar_pendientes, job_id=job.id, batch_limit=batch_limit)
+    return JSONResponse({"ok": True, "job_id": job.id, "tipo": job.tipo, "status_url": f"/admin/panel/jobs/{job.id}"})
 
 
 @router.post("/panel/stock/run-now")
 async def panel_stock_run_now(
+    background_tasks: BackgroundTasks,
     batch_limit: int = Query(default=100, ge=1, le=1000),
-    estado: str = Query(default="importado"),
-    q: str | None = Query(default=None),
     db: Session = Depends(get_db_session),
-) -> RedirectResponse:
-    """Ejecuta sincronización manual de stock desde el panel."""
+) -> JSONResponse:
+    """Ejecuta sincronización manual de stock como job visible."""
 
-    settings = get_settings()
-    service = StockSyncService(settings=settings, db=db)
-    result = await service.sincronizar_lote(limit=batch_limit)
-    mensaje = (
-        f"Stock sincronizado. Seleccionados: {result.get('seleccionados', 0)}. "
-        f"Actualizados: {result.get('actualizados', 0)}. "
-        f"Sin cambios: {result.get('sin_cambios', 0)}. "
-        f"Simulados: {result.get('simulados', 0)}. "
-        f"No consultables: {result.get('stock_no_consultable', 0)}. "
-        f"Errores: {result.get('errores', 0)}."
+    job = SyncJobRepository(db).crear(
+        tipo="STOCK_SYNC_LOTE",
+        progreso={"mensaje": "Job creado para sincronización de stock.", "batch_limit": batch_limit, "porcentaje": 0},
     )
-    return _panel_redirect(estado, mensaje, q=q)
+    background_tasks.add_task(ejecutar_job_stock_lote, job_id=job.id, batch_limit=batch_limit)
+    return JSONResponse({"ok": True, "job_id": job.id, "tipo": job.tipo, "status_url": f"/admin/panel/jobs/{job.id}"})
 
 
 @router.post("/panel/stock/run-sku")
 async def panel_stock_run_sku(
+    background_tasks: BackgroundTasks,
     sku: str = Form(..., min_length=1),
-    estado: str = Query(default="importado"),
-    q: str | None = Query(default=None),
     db: Session = Depends(get_db_session),
-) -> RedirectResponse:
-    """Sincroniza stock de un SKU puntual desde el panel."""
+) -> JSONResponse:
+    """Sincroniza stock de un SKU como job visible."""
 
-    settings = get_settings()
-    service = StockSyncService(settings=settings, db=db)
-    result = await service.sincronizar_sku(sku=sku.strip())
-    mensaje = (
-        f"Stock SKU {sku}: {result.get('estado', '-')}. "
-        f"Anterior: {result.get('stock_anterior', '-')}. "
-        f"Nuevo: {result.get('stock_nuevo', '-')}"
+    clean_sku = sku.strip()
+    job = SyncJobRepository(db).crear(
+        tipo="STOCK_SYNC_SKU",
+        sku=clean_sku,
+        progreso={"mensaje": f"Job creado para stock SKU {clean_sku}.", "sku": clean_sku, "porcentaje": 0},
     )
-    return _panel_redirect(estado, mensaje, q=q)
+    background_tasks.add_task(ejecutar_job_stock_sku, job_id=job.id, sku=clean_sku)
+    return JSONResponse({"ok": True, "job_id": job.id, "tipo": job.tipo, "status_url": f"/admin/panel/jobs/{job.id}"})
 
 
 @router.post("/panel/decisiones/reconciliar-tn")
@@ -527,54 +547,52 @@ def panel_marcar_mapeos_eliminados_externos(
 
 @router.post("/panel/categorias/normalizar-duplicadas")
 async def panel_normalizar_categorias_duplicadas(
+    background_tasks: BackgroundTasks,
     confirm: bool = Query(default=True),
-    estado: str = Query(default="todos"),
-    q: str | None = Query(default=None),
     db: Session = Depends(get_db_session),
-) -> RedirectResponse:
-    """Reasigna productos a categorias canonicas y elimina duplicados de Tienda Nube."""
+) -> JSONResponse:
+    """Reasigna productos a categorias canonicas y elimina duplicados como job visible."""
 
-    settings = get_settings()
-    service = TiendaNubeCategoryService(settings=settings, audit_repo=SyncAuditRepository(db))
-    result = await service.normalizar_categorias_duplicadas(confirm=confirm)
-    mensaje = (
-        f"Categorías normalizadas. Duplicadas detectadas: {result.get('categorias_duplicadas_detectadas', 0)}. "
-        f"Productos actualizados: {result.get('productos_actualizados', 0)}. "
-        f"Categorías eliminadas: {result.get('categorias_eliminadas', 0)}. "
-        f"Errores: {len(result.get('errores_productos', [])) + len(result.get('errores_eliminacion', []))}."
+    job = SyncJobRepository(db).crear(
+        tipo="NORMALIZAR_CATEGORIAS_TN",
+        progreso={"mensaje": "Job creado para normalizar categorías.", "porcentaje": 0},
     )
-    return _panel_redirect(estado, mensaje, q=q)
+    background_tasks.add_task(ejecutar_job_normalizar_categorias, job_id=job.id, confirm=confirm)
+    return JSONResponse({"ok": True, "job_id": job.id, "tipo": job.tipo, "status_url": f"/admin/panel/jobs/{job.id}"})
+
+
+@router.post("/panel/auditar-bloqueados")
+async def panel_auditar_bloqueados_por_decision(
+    background_tasks: BackgroundTasks,
+    decision: str = Query(default="NO_PUBLICAR_SIN_DESCRIPCION_WEB"),
+    batch_limit: int = Query(default=200, ge=1, le=1000),
+    db: Session = Depends(get_db_session),
+) -> JSONResponse:
+    """Reaudita bloqueados por decisión y muestra detalle de requisitos faltantes."""
+
+    job = SyncJobRepository(db).crear(
+        tipo="REAUDITAR_BLOQUEADOS",
+        progreso={"mensaje": f"Job creado para reauditar {decision}.", "decision": decision, "batch_limit": batch_limit, "porcentaje": 0},
+    )
+    background_tasks.add_task(ejecutar_job_reauditar_decision, job_id=job.id, decision=decision, batch_limit=batch_limit)
+    return JSONResponse({"ok": True, "job_id": job.id, "tipo": job.tipo, "status_url": f"/admin/panel/jobs/{job.id}"})
 
 
 @router.post("/panel/auditar-bloqueados-sin-descripcion")
 async def panel_auditar_bloqueados_sin_descripcion(
+    background_tasks: BackgroundTasks,
     batch_limit: int = Query(default=200, ge=1, le=1000),
-    concurrency: int = Query(default=3, ge=1, le=10),
-    estado: str = Query(default="publicable_pendiente"),
-    q: str | None = Query(default=None),
     db: Session = Depends(get_db_session),
-) -> RedirectResponse:
-    """Reaudita bloqueados por falta de descripción para detectar descripciones nuevas en GBP."""
+) -> JSONResponse:
+    """Compatibilidad: reaudita bloqueados por falta de descripción como job visible."""
 
-    settings = get_settings()
-    productos = ProductoRepository(db)
-    skus = productos.listar_skus_por_decision("NO_PUBLICAR_SIN_DESCRIPCION_WEB", limit=batch_limit)
-    service = TiendaNubeImportService(settings=settings, db=db)
-    procesados = 0
-    publicables = 0
-    errores = 0
-    for sku in skus:
-        result = await service.importar_producto_manual_tienda_nube(sku=sku, confirm=False, forzar=False)
-        procesados += 1
-        if result.get("decision") == "PUBLICABLE_AUTOMATICO":
-            publicables += 1
-        if not result.get("ok"):
-            errores += 1
-    mensaje = (
-        f"Reauditoría de bloqueados sin descripción finalizada. Procesados: {procesados}. "
-        f"Ahora publicables: {publicables}. Errores: {errores}."
+    job = SyncJobRepository(db).crear(
+        tipo="REAUDITAR_SIN_DESCRIPCION",
+        progreso={"mensaje": "Job creado para reauditar bloqueados sin descripción.", "decision": "NO_PUBLICAR_SIN_DESCRIPCION_WEB", "batch_limit": batch_limit, "porcentaje": 0},
     )
-    return _panel_redirect(estado, mensaje, q=q)
+    background_tasks.add_task(ejecutar_job_reauditar_decision, job_id=job.id, decision="NO_PUBLICAR_SIN_DESCRIPCION_WEB", batch_limit=batch_limit)
+    return JSONResponse({"ok": True, "job_id": job.id, "tipo": job.tipo, "status_url": f"/admin/panel/jobs/{job.id}"})
+
 
 @router.post("/panel/decisiones/{sku}/ocultar-tn")
 async def panel_ocultar_producto_tienda_nube(
