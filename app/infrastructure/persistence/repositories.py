@@ -976,6 +976,38 @@ class SyncJobRepository:
 
         return self.serializar(self.obtener(job_id))
 
+    def solicitar_cancelacion(self, job_id: int) -> SyncJobModel | None:
+        """Marca un job como cancelación solicitada.
+
+        La cancelación se respeta entre tandas o entre productos. No interrumpe
+        una llamada externa que ya esté en curso.
+        """
+
+        job = self.obtener(job_id)
+        if job is None:
+            return None
+        if job.estado in ("FINALIZADO", "FINALIZADO_CON_ERRORES", "ERROR", "CANCELADO"):
+            return job
+        progreso: dict[str, object] = {}
+        if job.error_mensaje:
+            try:
+                progreso = json.loads(job.error_mensaje)
+            except json.JSONDecodeError:
+                progreso = {"mensaje_anterior": job.error_mensaje}
+        progreso["cancelacion_solicitada"] = True
+        progreso["mensaje"] = "Cancelación solicitada. El proceso se detendrá al terminar la operación en curso."
+        job.estado = "CANCELACION_SOLICITADA"
+        job.error_mensaje = json.dumps(progreso, ensure_ascii=False)
+        self.db.commit()
+        self.db.refresh(job)
+        return job
+
+    def cancelacion_solicitada(self, job_id: int) -> bool:
+        """Indica si un job debe detenerse en el próximo punto seguro."""
+
+        job = self.obtener(job_id)
+        return bool(job and job.estado in ("CANCELACION_SOLICITADA", "CANCELADO"))
+
 
     def listar_recientes(self, limit: int = 12) -> list[dict[str, object]]:
         """Lista jobs recientes para recuperar popups de progreso desde el panel."""
@@ -992,7 +1024,7 @@ class SyncJobRepository:
 
         rows = self.db.scalars(
             select(SyncJobModel)
-            .where(SyncJobModel.estado.in_(("PENDIENTE", "EN_PROCESO")))
+            .where(SyncJobModel.estado.in_(("PENDIENTE", "EN_PROCESO", "CANCELACION_SOLICITADA")))
             .order_by(SyncJobModel.created_at.desc().nullslast(), SyncJobModel.id.desc())
             .limit(limit)
         ).all()

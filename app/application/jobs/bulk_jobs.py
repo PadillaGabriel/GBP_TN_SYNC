@@ -31,6 +31,22 @@ def _update_job(job_id: int, *, estado: str | None = None, progreso: dict[str, o
         )
 
 
+def _cancel_requested(job_id: int) -> bool:
+    """Devuelve True si el usuario pidió cancelar el job."""
+
+    with SessionLocal() as db:
+        return SyncJobRepository(db).cancelacion_solicitada(job_id)
+
+
+def _mark_cancelled(job_id: int, progreso: dict[str, object] | None = None) -> None:
+    """Marca cancelación finalizada en el punto seguro actual."""
+
+    payload = {"mensaje": "Proceso cancelado por el usuario.", "porcentaje": 100}
+    if progreso:
+        payload.update(progreso)
+    _update_job(job_id, estado="CANCELADO", progreso=payload, finalizar=True)
+
+
 async def ejecutar_job_auditar_todo(
     *,
     job_id: int,
@@ -62,6 +78,15 @@ async def ejecutar_job_auditar_todo(
             )
 
         while True:
+            if _cancel_requested(job_id):
+                _mark_cancelled(job_id, {
+                    "procesados": total_procesados,
+                    "publicables": total_publicables,
+                    "bloqueados": total_bloqueados,
+                    "errores": total_errores,
+                    "pendientes": int(ultimo_pendiente or 0),
+                })
+                return
             with SessionLocal() as db:
                 service = GBPAuditService(settings=settings, db=db)
                 result = await service.ejecutar_auditoria_productos(
@@ -188,7 +213,18 @@ async def ejecutar_job_importar_todo(
                 },
             )
 
+        sin_avance_consecutivo = 0
         while True:
+            if _cancel_requested(job_id):
+                _mark_cancelled(job_id, {
+                    "procesados": total_procesados,
+                    "creados": total_creados,
+                    "actualizados": total_actualizados,
+                    "bloqueados": total_bloqueados,
+                    "errores": total_errores,
+                    "pendientes": pendientes,
+                })
+                return
             with SessionLocal() as db:
                 pendientes = int(ProductoRepository(db).resumen_operativo_panel().get("publicables_pendientes_importar") or 0)
             if pendientes <= 0:
@@ -205,6 +241,10 @@ async def ejecutar_job_importar_todo(
             total_actualizados += int(result.get("actualizados") or 0)
             total_bloqueados += int(result.get("bloqueados") or 0)
             total_errores += int(result.get("errores") or 0)
+            if procesados <= 0 or (seleccionados > 0 and int(result.get("errores") or 0) >= seleccionados):
+                sin_avance_consecutivo += 1
+            else:
+                sin_avance_consecutivo = 0
 
             with SessionLocal() as db:
                 pendientes = int(ProductoRepository(db).resumen_operativo_panel().get("publicables_pendientes_importar") or 0)
@@ -235,7 +275,28 @@ async def ejecutar_job_importar_todo(
                 },
             )
 
-            if seleccionados <= 0:
+            if seleccionados <= 0 or procesados <= 0 or sin_avance_consecutivo >= 1:
+                if sin_avance_consecutivo >= 1 and pendientes > 0:
+                    total_errores += 1
+                    _update_job(
+                        job_id,
+                        estado="FINALIZADO_CON_ERRORES",
+                        finalizar=True,
+                        progreso={
+                            "mensaje": "Importación detenida por falta de avance. Revisar errores de la última tanda antes de continuar.",
+                            "batch_limit": batch_limit,
+                            "dry_run": settings.dry_run,
+                            "pendientes_iniciales": total_inicial,
+                            "procesados": total_procesados,
+                            "creados": total_creados,
+                            "actualizados": total_actualizados,
+                            "bloqueados": total_bloqueados,
+                            "errores": total_errores,
+                            "pendientes": pendientes,
+                            "porcentaje": _percent(total_procesados, max(total_inicial, 1)),
+                        },
+                    )
+                    return
                 break
 
         _update_job(
@@ -297,6 +358,9 @@ async def ejecutar_job_auditar_proximos(
 
     settings = get_settings()
     try:
+        if _cancel_requested(job_id):
+            _mark_cancelled(job_id)
+            return
         _update_job(
             job_id,
             estado="EN_PROCESO",
@@ -510,6 +574,15 @@ async def ejecutar_job_reauditar_decision(
             SyncJobRepository(db).actualizar(job_id, estado="EN_PROCESO", iniciar=True, progreso={"mensaje": f"Reauditando {decision}.", "porcentaje": 0, "total": total_estimado})
 
         for sku in skus:
+            if _cancel_requested(job_id):
+                _mark_cancelled(job_id, {
+                    "procesados": total,
+                    "publicables": publicables,
+                    "siguen_bloqueados": siguen_bloqueados,
+                    "errores": errores,
+                    "detalle_muestra": detalle,
+                })
+                return
             try:
                 with SessionLocal() as db:
                     service = TiendaNubeImportService(settings=settings, db=db)
@@ -564,4 +637,46 @@ async def ejecutar_job_reauditar_decision(
         })
     except Exception as exc:  # noqa: BLE001
         logger.exception("job_reauditar_decision_failed", extra={"job_id": job_id, "decision": decision})
+        _update_job(job_id, estado="ERROR", finalizar=True, error_codigo=type(exc).__name__, progreso={"mensaje": str(exc), "porcentaje": 100})
+
+async def ejecutar_job_reconciliar_tienda_nube(
+    *,
+    job_id: int,
+    limit: int = 500,
+) -> None:
+    """Reconciliación de mapeos locales contra Tienda Nube como job visible."""
+
+    settings = get_settings()
+    try:
+        if _cancel_requested(job_id):
+            _mark_cancelled(job_id)
+            return
+        with SessionLocal() as db:
+            SyncJobRepository(db).actualizar(job_id, estado="EN_PROCESO", iniciar=True, progreso={"mensaje": "Reconciliando mapeos con Tienda Nube.", "porcentaje": 5, "limit": limit})
+            service = TiendaNubeImportService(settings=settings, db=db)
+            result = await service.reconciliar_mapeos_tienda_nube(limit=limit)
+        _update_job(job_id, estado="FINALIZADO" if int(result.get("errores") or 0) == 0 else "FINALIZADO_CON_ERRORES", finalizar=True, progreso={**result, "mensaje": "Reconciliación finalizada.", "porcentaje": 100})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("job_reconciliar_tn_failed", extra={"job_id": job_id})
+        _update_job(job_id, estado="ERROR", finalizar=True, error_codigo=type(exc).__name__, progreso={"mensaje": str(exc), "porcentaje": 100})
+
+
+def ejecutar_job_reset_mapeos_locales(
+    *,
+    job_id: int,
+) -> None:
+    """Marca mapeos activos como eliminados externos como job visible."""
+
+    settings = get_settings()
+    try:
+        if _cancel_requested(job_id):
+            _mark_cancelled(job_id)
+            return
+        with SessionLocal() as db:
+            SyncJobRepository(db).actualizar(job_id, estado="EN_PROCESO", iniciar=True, progreso={"mensaje": "Marcando mapeos locales como eliminado_externo.", "porcentaje": 20})
+            service = TiendaNubeImportService(settings=settings, db=db)
+            result = service.marcar_mapeos_como_eliminados_externos(confirm=True)
+        _update_job(job_id, estado="FINALIZADO", finalizar=True, progreso={**result, "mensaje": "Reset de mapeos locales finalizado.", "porcentaje": 100})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("job_reset_mapeos_failed", extra={"job_id": job_id})
         _update_job(job_id, estado="ERROR", finalizar=True, error_codigo=type(exc).__name__, progreso={"mensaje": str(exc), "porcentaje": 100})

@@ -24,21 +24,14 @@
       <section class="notice">{{ mensaje }}</section>
     {% endif %}
 
-    {% if not settings.dry_run %}
-      <section class="risk-banner">
-        <strong>DRY_RUN=false.</strong>
-        Las acciones Ocultar, Eliminar TN e Importar forzado pueden escribir en Tienda Nube.
-      </section>
-    {% endif %}
 
-
-    <section class="jobs-card">
+    <section class="jobs-card control-card">
       <div class="card-title-row">
         <div>
-          <h2>Procesos en segundo plano</h2>
-          <p>Últimas acciones ejecutadas. Podés cerrar el popup y volver a abrir el progreso desde acá.</p>
+          <h2>Centro de procesos</h2>
+          <p>Seguimiento de auditorías, importaciones, stock y mantenimiento. Cada proceso puede cerrarse y volver a abrirse desde esta lista.</p>
         </div>
-        <button class="btn secondary" type="button" id="refresh-jobs">Actualizar procesos</button>
+        <button class="btn secondary" type="button" id="refresh-jobs">Actualizar</button>
       </div>
       <div id="jobs-list" class="jobs-list">
         {% for job in dashboard.jobs_activos %}
@@ -183,13 +176,13 @@
           </div>
         </div>
         <div class="action-grid maintenance-grid">
-          <form method="post" action="/admin/panel/decisiones/reconciliar-tn?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Reconciliar con Tienda Nube" data-confirm-text="Se verificará si los productos mapeados localmente siguen existiendo en Tienda Nube. No crea ni elimina publicaciones. Solo corrige estados locales." data-confirm-kind="secondary">
+          <form method="post" data-async-job="true" action="/admin/panel/decisiones/reconciliar-tn?limit=500" data-confirm-title="Reconciliar con Tienda Nube" data-confirm-text="Se verificará si los productos mapeados localmente siguen existiendo en Tienda Nube. No crea ni elimina publicaciones. Solo corrige estados locales." data-confirm-kind="secondary">
             <button class="btn secondary" type="submit">Reconciliar TN</button>
           </form>
           <form method="post" data-async-job="true" action="/admin/panel/categorias/normalizar-duplicadas?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Normalizar categorías duplicadas" data-confirm-text="Se reasignarán productos a categorías canónicas y se intentará eliminar categorías duplicadas en Tienda Nube. Usar después de importaciones masivas o si el menú muestra categorías repetidas." data-confirm-kind="danger">
             <button class="btn danger-outline" type="submit">Normalizar categorías</button>
           </form>
-          <form method="post" action="/admin/panel/decisiones/mapeos/marcar-eliminados-externos?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Marcar mapeos como eliminados externos" data-confirm-text="Usar solo si ya eliminaste manualmente las publicaciones en Tienda Nube. Los mapeos locales pasarán a eliminado_externo y esos SKUs podrán importarse nuevamente si siguen publicables." data-confirm-kind="danger">
+          <form method="post" data-async-job="true" action="/admin/panel/decisiones/mapeos/marcar-eliminados-externos" data-confirm-title="Marcar mapeos como eliminados externos" data-confirm-text="Usar solo si ya eliminaste manualmente las publicaciones en Tienda Nube. Los mapeos locales pasarán a eliminado_externo y esos SKUs podrán importarse nuevamente si siguen publicables." data-confirm-kind="danger">
             <button class="btn danger-outline" type="submit">Reset mapeos locales</button>
           </form>
         </div>
@@ -304,12 +297,23 @@
 
 
   <dialog id="progress-modal" class="confirm-modal progress-modal">
-    <div class="modal-box">
-      <h2 id="progress-title">Proceso en ejecución</h2>
-      <p id="progress-status">Iniciando...</p>
+    <div class="modal-box progress-box">
+      <div class="progress-header">
+        <div>
+          <p class="eyebrow">Proceso en segundo plano</p>
+          <h2 id="progress-title">Proceso en ejecución</h2>
+          <p id="progress-status">Iniciando...</p>
+        </div>
+        <span id="progress-percent" class="progress-percent">0%</span>
+      </div>
       <div class="progress-track"><div id="progress-bar" class="progress-bar" style="width: 0%"></div></div>
-      <pre id="progress-details" class="progress-details"></pre>
+      <div id="progress-summary" class="progress-summary"></div>
+      <details class="progress-raw">
+        <summary>Ver detalle técnico</summary>
+        <pre id="progress-details" class="progress-details"></pre>
+      </details>
       <div class="modal-actions">
+        <button id="progress-cancel" class="btn danger-outline" type="button">Cancelar proceso</button>
         <button id="progress-close" class="btn secondary" type="button">Cerrar</button>
         <a id="progress-refresh" class="btn primary" href="/admin/panel">Actualizar panel</a>
       </div>

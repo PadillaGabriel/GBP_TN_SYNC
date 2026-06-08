@@ -462,3 +462,127 @@ small,
   color: #6b7280;
   font-size: 13px;
 }
+
+/* UX refresh: coherent dark cards, no white process block, denser control console. */
+.notice { margin-bottom: 1rem; }
+.risk-banner { display: none; }
+.jobs-card {
+  background: linear-gradient(180deg, rgba(47,107,255,0.05), transparent), var(--surface) !important;
+  border: 1px solid var(--line) !important;
+  color: var(--text) !important;
+  border-radius: 1rem !important;
+  box-shadow: var(--shadow) !important;
+  padding: 1rem !important;
+  margin: 0 0 1rem !important;
+}
+.jobs-card .card-title-row { align-items: center; }
+.jobs-card h2 { color: var(--text); }
+.jobs-card p { color: var(--muted); }
+.jobs-list { gap: 0.55rem !important; }
+.job-chip {
+  display: inline-grid;
+  grid-template-columns: auto auto auto;
+  gap: 0.35rem;
+  align-items: center;
+  border: 1px solid var(--line) !important;
+  background: var(--surface-2) !important;
+  color: var(--muted) !important;
+  border-radius: 999px !important;
+  padding: 0.5rem 0.7rem !important;
+}
+.job-chip strong { color: var(--text); font-size: 0.78rem; }
+.job-chip em { color: var(--muted-2); font-style: normal; font-size: 0.74rem; }
+.job-chip.active {
+  border-color: rgba(47,107,255,0.75) !important;
+  background: rgba(47,107,255,0.14) !important;
+  color: #dce7ff !important;
+}
+.control-panel {
+  grid-template-columns: minmax(0, 1.15fr) minmax(340px, 0.85fr);
+  grid-template-areas:
+    "filters sku"
+    "ops stock"
+    "ops maintenance";
+}
+.control-card { min-height: auto; }
+.filter-form { grid-template-columns: minmax(180px, 0.35fr) minmax(260px, 1fr) minmax(105px, 0.16fr) auto; }
+.action-grid { grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); }
+.action-grid .btn { min-height: 3rem; }
+.btn { transition: transform .12s ease, filter .12s ease, opacity .12s ease; }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { cursor: not-allowed; opacity: .62; }
+.summary-grid { grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); }
+.summary-card.danger { border-color: var(--line); }
+.summary-card.danger span::after { content: " · escritura real"; color: #ffaaa3; font-weight: 700; }
+.progress-modal .progress-box {
+  width: min(760px, calc(100vw - 2rem));
+  max-height: min(86vh, 760px);
+  overflow: auto;
+}
+.progress-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.progress-percent {
+  min-width: 4.5rem;
+  padding: .5rem .65rem;
+  border-radius: .8rem;
+  background: rgba(47,107,255,.16);
+  color: #dce7ff;
+  text-align: center;
+  font-weight: 900;
+}
+.progress-summary { margin: 1rem 0; }
+.progress-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+  gap: .65rem;
+}
+.progress-cards article {
+  border: 1px solid var(--line);
+  border-radius: .85rem;
+  padding: .75rem;
+  background: var(--surface-2);
+}
+.progress-cards span {
+  display: block;
+  color: var(--muted);
+  font-size: .72rem;
+  margin-bottom: .25rem;
+}
+.progress-cards strong {
+  display: block;
+  color: var(--text);
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+}
+.job-sample {
+  margin-top: .75rem;
+  border: 1px solid var(--line);
+  border-radius: .85rem;
+  padding: .75rem;
+  background: var(--surface-3);
+}
+.job-sample h3 { margin: 0 0 .5rem; font-size: .9rem; }
+.job-sample p { margin: .25rem 0; color: var(--muted); }
+.progress-raw summary {
+  cursor: pointer;
+  color: var(--muted);
+  margin-bottom: .5rem;
+}
+.progress-details { max-height: 220px; }
+.stock-sync-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.stock-sku-form { grid-column: 1 / -1; }
+@media (max-width: 1200px) {
+  .control-panel { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .jobs-card .card-title-row,
+  .progress-header { flex-direction: column; }
+  .job-chip { grid-template-columns: 1fr; border-radius: .85rem !important; }
+  .stock-sync-grid { grid-template-columns: 1fr; }
+  .stock-sku-form { grid-template-columns: 1fr; }
+}

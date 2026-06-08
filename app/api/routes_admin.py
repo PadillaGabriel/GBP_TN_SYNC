@@ -14,6 +14,8 @@ from app.application.jobs.bulk_jobs import (
     ejecutar_job_importar_todo,
     ejecutar_job_normalizar_categorias,
     ejecutar_job_reauditar_decision,
+    ejecutar_job_reconciliar_tienda_nube,
+    ejecutar_job_reset_mapeos_locales,
     ejecutar_job_stock_lote,
     ejecutar_job_stock_sku,
 )
@@ -421,6 +423,17 @@ def panel_listar_jobs(db: Session = Depends(get_db_session)) -> JSONResponse:
     return JSONResponse({"ok": True, "activos": repo.listar_activos(limit=12), "recientes": repo.listar_recientes(limit=12)})
 
 
+@router.post("/panel/jobs/{job_id}/cancel")
+def panel_cancelar_job(job_id: int, db: Session = Depends(get_db_session)) -> JSONResponse:
+    """Solicita cancelación visible de un job largo."""
+
+    repo = SyncJobRepository(db)
+    job = repo.solicitar_cancelacion(job_id)
+    if job is None:
+        return JSONResponse({"ok": False, "error": "Job no encontrado"}, status_code=404)
+    return JSONResponse({"ok": True, "job": repo.serializar(job)})
+
+
 @router.post("/panel/importar-sku")
 async def panel_importar_sku_directo(
     background_tasks: BackgroundTasks,
@@ -509,40 +522,33 @@ async def panel_stock_run_sku(
 
 @router.post("/panel/decisiones/reconciliar-tn")
 async def panel_reconciliar_mapeos_tienda_nube(
-    estado: str = Query(default="requiere_revision"),
-    q: str | None = Query(default=None),
+    background_tasks: BackgroundTasks,
     limit: int = Query(default=500, ge=1, le=1000),
     db: Session = Depends(get_db_session),
-) -> RedirectResponse:
-    """Acción visual: verifica si los productos mapeados siguen existiendo en Tienda Nube."""
+) -> JSONResponse:
+    """Verifica mapeos contra Tienda Nube como job visible."""
 
-    settings = get_settings()
-    service = TiendaNubeImportService(settings=settings, db=db)
-    result = await service.reconciliar_mapeos_tienda_nube(limit=limit)
-    mensaje = (
-        f"Reconciliación finalizada. Verificados: {result.get('verificados', 0)}. "
-        f"Marcados eliminado_externo: {result.get('marcados_eliminados_externos', 0)}. "
-        f"Errores: {result.get('errores', 0)}."
+    job = SyncJobRepository(db).crear(
+        tipo="RECONCILIAR_TN",
+        progreso={"mensaje": "Job creado para reconciliar Tienda Nube.", "limit": limit, "porcentaje": 0},
     )
-    return _panel_redirect(estado, mensaje, q=q)
+    background_tasks.add_task(ejecutar_job_reconciliar_tienda_nube, job_id=job.id, limit=limit)
+    return JSONResponse({"ok": True, "job_id": job.id, "tipo": job.tipo, "status_url": f"/admin/panel/jobs/{job.id}"})
 
 
 @router.post("/panel/decisiones/mapeos/marcar-eliminados-externos")
 def panel_marcar_mapeos_eliminados_externos(
-    estado: str = Query(default="requiere_revision"),
-    q: str | None = Query(default=None),
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db_session),
-) -> RedirectResponse:
-    """Acción visual: marca todos los mapeos locales como eliminados externamente."""
+) -> JSONResponse:
+    """Marca mapeos como eliminados externamente como job visible."""
 
-    settings = get_settings()
-    service = TiendaNubeImportService(settings=settings, db=db)
-    result = service.marcar_mapeos_como_eliminados_externos(confirm=True)
-    mensaje = (
-        f"Mapeos marcados como eliminado_externo: "
-        f"{result.get('mapeos_marcados_eliminado_externo', 0)}."
+    job = SyncJobRepository(db).crear(
+        tipo="RESET_MAPEOS_LOCALES",
+        progreso={"mensaje": "Job creado para resetear mapeos locales.", "porcentaje": 0},
     )
-    return _panel_redirect(estado, mensaje, q=q)
+    background_tasks.add_task(ejecutar_job_reset_mapeos_locales, job_id=job.id)
+    return JSONResponse({"ok": True, "job_id": job.id, "tipo": job.tipo, "status_url": f"/admin/panel/jobs/{job.id}"})
 
 
 @router.post("/panel/categorias/normalizar-duplicadas")
