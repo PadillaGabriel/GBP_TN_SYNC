@@ -17,6 +17,53 @@ from app.infrastructure.gbp.xml_parser import (
 
 logger = logging.getLogger(__name__)
 
+
+def normalizar_sku_para_gbp(sku: str | None) -> str:
+    """
+    Normalizacion conservadora para consultar GBP.
+
+    No elimina letras, numeros ni separadores internos. Solo limpia espacios
+    externos y caracteres invisibles frecuentes.
+    """
+    return (
+        str(sku or "")
+        .replace("\u00a0", " ")
+        .replace("\t", " ")
+        .replace("\r", "")
+        .replace("\n", "")
+        .strip()
+    )
+
+
+def _get_first_value(row: dict[str, Any], candidates: tuple[str, ...]) -> str | None:
+    """Obtiene el primer valor no vacio tolerando variantes de nombre de columna GBP."""
+    if not row:
+        return None
+
+    for candidate in candidates:
+        value = row.get(candidate)
+        if value not in (None, ""):
+            return str(value).strip()
+
+    lower_map = {str(key).lower(): value for key, value in row.items()}
+    for candidate in candidates:
+        value = lower_map.get(candidate.lower())
+        if value not in (None, ""):
+            return str(value).strip()
+
+    normalized_map = {
+        "".join(ch for ch in str(key).lower() if ch.isalnum()): value
+        for key, value in row.items()
+    }
+    for candidate in candidates:
+        normalized = "".join(ch for ch in candidate.lower() if ch.isalnum())
+        value = normalized_map.get(normalized)
+        if value not in (None, ""):
+            return str(value).strip()
+
+    return None
+
+
 SOAP_NAMESPACE = "http://microsoft.com/webservices/"
 SOAP_ACTION_PREFIX = SOAP_NAMESPACE.rstrip("/")
 SOAP_ENV = "http://schemas.xmlsoap.org/soap/envelope/"
@@ -50,7 +97,6 @@ class GBPClient:
         self.web_service_id = web_service_id
         self.timeout = httpx.Timeout(timeout_seconds)
 
-
     async def autenticar(self) -> str:
         """Autentica contra GBP y devuelve token temporal."""
 
@@ -76,9 +122,10 @@ class GBPClient:
     async def obtener_item_id_por_codigo(self, token: str, sku: str) -> str | None:
         """Resuelve código/SKU GBP a item_id interno."""
 
-        sku_normalizado = str(sku or "").strip()
+        sku_normalizado = normalizar_sku_para_gbp(sku)
 
         if not sku_normalizado:
+            logger.warning("gbp_item_id_por_codigo_sku_vacio", extra={"sku_original": sku})
             return None
 
         call = await self.call_soap_method(
@@ -92,11 +139,14 @@ class GBPClient:
         logger.info(
             "gbp_item_id_por_codigo_result",
             extra={
-                "sku": sku_normalizado,
+                "sku_original": sku,
+                "sku_normalizado": sku_normalizado,
                 "method": "wsgetItemIDfromCode_funGetXMLData",
                 "rows": len(rows),
                 "result_len": len(call.result_text or ""),
-                "result_preview": (call.result_text or "")[:300],
+                "result_preview": (call.result_text or "")[:500],
+                "row_keys": list(rows[0].keys()) if rows else [],
+                "row_preview": rows[0] if rows else None,
             },
         )
 
@@ -120,13 +170,22 @@ class GBPClient:
             logger.warning(
                 "gbp_item_id_por_codigo_sin_item_id",
                 extra={
-                    "sku": sku_normalizado,
-                    "row_keys": list(rows[0].keys()) if rows else [],
-                    "row_preview": rows[0] if rows else None,
+                    "sku_original": sku,
+                    "sku_normalizado": sku_normalizado,
+                    "row_keys": list(rows[0].keys()),
+                    "row_preview": rows[0],
                 },
             )
             return None
 
+        logger.info(
+            "gbp_item_id_por_codigo_ok",
+            extra={
+                "sku_original": sku,
+                "sku_normalizado": sku_normalizado,
+                "item_id": item_id,
+            },
+        )
         return item_id
 
     async def obtener_producto_por_id(self, token: str, item_id: int | str) -> dict[str, str]:
@@ -204,7 +263,6 @@ class GBPClient:
                     "item_vendorCode",
                 ),
             )
-
             item_desc = _get_first_value(
                 row,
                 (
@@ -224,7 +282,7 @@ class GBPClient:
                 **row,
                 "item_id": item_id_str,
                 "item_code": str(item_code or "").strip(),
-                "item_desc": str(item_desc or "").strip(),
+                "item_desc": str(item_desc or item_code or f"Producto {item_id_str}").strip(),
                 "item_web": row.get("item_web", ""),
                 "item_disabled": row.get("item_disabled", "false"),
                 "item_not4Sale": row.get("item_not4Sale", "false"),
@@ -240,7 +298,6 @@ class GBPClient:
                     "titulo": detalle_basico.get("item_desc"),
                 },
             )
-
             return detalle_basico
 
         logger.warning(
@@ -251,9 +308,8 @@ class GBPClient:
                 "catalogo_rows": len(catalogo),
             },
         )
-
         return None
-    
+
     async def obtener_producto_por_id_robusto(
         self,
         token: str,
@@ -432,21 +488,3 @@ class GBPClient:
         if isinstance(value, bool):
             return "true" if value else "false"
         return escape(str(value))
-
-def _get_first_value(row: dict[str, Any], candidates: tuple[str, ...]) -> str | None:
-        if not row:
-            return None
-
-        for candidate in candidates:
-            value = row.get(candidate)
-            if value not in (None, ""):
-                return str(value).strip()
-
-        lower_map = {str(key).lower(): value for key, value in row.items()}
-
-        for candidate in candidates:
-            value = lower_map.get(candidate.lower())
-            if value not in (None, ""):
-                return str(value).strip()
-
-        return None

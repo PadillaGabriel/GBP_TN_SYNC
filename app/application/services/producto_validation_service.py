@@ -20,19 +20,23 @@ class ProductoValidationService:
         producto: Producto,
         *,
         exigir_item_web: bool = True,
+        modo_manual_flexible: bool = False,
     ) -> ResultadoValidacionProducto:
         motivos: list[str] = []
         cumple: list[str] = []
 
         self._check(bool(producto.sku.strip()), "SKU valido", "SIN_SKU", motivos, cumple)
         self._check(bool(producto.titulo.strip()), "Titulo valido", "SIN_TITULO", motivos, cumple)
-        self._check(
-            producto.tiene_imagen_website,
-            "Imagen Website",
-            "SIN_IMAGEN_WEBSITE",
-            motivos,
-            cumple,
-        )
+        if modo_manual_flexible and not producto.tiene_imagen_website:
+            cumple.append("Imagen Website omitida por importacion manual")
+        else:
+            self._check(
+                producto.tiene_imagen_website,
+                "Imagen Website",
+                "SIN_IMAGEN_WEBSITE",
+                motivos,
+                cumple,
+            )
         if producto.publicable_web is True:
             cumple.append("item_web=true")
         elif exigir_item_web and producto.publicable_web is False:
@@ -44,34 +48,43 @@ class ProductoValidationService:
             
         self._check(not producto.item_disabled, "item_disabled=false", "ITEM_DISABLED", motivos, cumple)
         self._check(not producto.item_not_for_sale, "item_not4Sale=false", "ITEM_NOT_FOR_SALE", motivos, cumple)
-        self._check(
-            producto.tiene_descripcion_web,
-            "Descripcion Website",
-            "SIN_DESCRIPCION_WEB",
-            motivos,
-            cumple,
-        )
-        self._check(
-            producto.precio_online_valido,
-            "Precio online valido",
-            "SIN_PRECIO_ONLINE",
-            motivos,
-            cumple,
-        )
-        self._check(
-            producto.stock is not None and producto.stock.consultable,
-            "Stock disponible consultable",
-            "STOCK_NO_CONSULTABLE",
-            motivos,
-            cumple,
-        )
-        self._check(
-            producto.stock is not None and producto.stock.cantidad > 0,
-            "Stock mayor a 0",
-            "STOCK_SIN_DISPONIBLE",
-            motivos,
-            cumple,
-        )
+        if modo_manual_flexible and not producto.tiene_descripcion_web:
+            cumple.append("Descripcion Website omitida por importacion manual")
+        else:
+            self._check(
+                producto.tiene_descripcion_web,
+                "Descripcion Website",
+                "SIN_DESCRIPCION_WEB",
+                motivos,
+                cumple,
+            )
+        if modo_manual_flexible and not producto.precio_online_valido:
+            cumple.append("Precio online omitido por importacion manual")
+        else:
+            self._check(
+                producto.precio_online_valido,
+                "Precio online valido",
+                "SIN_PRECIO_ONLINE",
+                motivos,
+                cumple,
+            )
+        if modo_manual_flexible and producto.stock is None:
+            cumple.append("Stock omitido por importacion manual")
+        else:
+            self._check(
+                producto.stock is not None and producto.stock.consultable,
+                "Stock disponible consultable",
+                "STOCK_NO_CONSULTABLE",
+                motivos,
+                cumple,
+            )
+            self._check(
+                producto.stock is not None and producto.stock.cantidad > 0,
+                "Stock mayor a 0",
+                "STOCK_SIN_DISPONIBLE",
+                motivos,
+                cumple,
+            )
 
         if motivos:
             return ResultadoValidacionProducto(

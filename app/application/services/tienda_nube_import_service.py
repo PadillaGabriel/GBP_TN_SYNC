@@ -7,7 +7,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.application.services.producto_validation_service import ProductoValidationService
-from app.domain.errors import GBPProductoNoConsultableError, GBPSkuNoResueltoError
+from app.domain.errors import DatoIncompletoError, GBPProductoNoConsultableError, GBPSkuNoResueltoError
+from app.domain.models.producto import Producto
 from app.infrastructure.gbp.client import GBPClient
 from app.infrastructure.gbp.normalizer import GBPNormalizer
 from app.infrastructure.gbp.xml_parser import normalizar_objeto_gbp
@@ -229,40 +230,16 @@ class TiendaNubeImportService:
                 }
             )
 
-        try:
-            producto = await self._obtener_producto_publicable(
-                token=token,
-                item_id=str(resolved_item_id),
-            )
-        except GBPProductoNoConsultableError as exc:
-            logger.warning(
-                "tn_import_producto_no_consultable",
-                extra={
-                    "sku": sku,
-                    "item_id": str(resolved_item_id),
-                    "error": str(exc),
-                },
-            )
+        producto = await self._obtener_producto_manual_flexible(
+            token=token,
+            item_id=str(resolved_item_id),
+            sku=sku or str(resolved_item_id),
+        )
 
-            return normalizar_objeto_gbp(
-                {
-                    "ok": True,
-                    "dry_run": self.settings.dry_run,
-                    "confirm": confirm,
-                    "forzar": forzar,
-                    "ejecuta_tienda_nube": False,
-                    "sku": sku,
-                    "id_sistema_gbp": str(resolved_item_id),
-                    "estado": "BLOQUEADO",
-                    "decision": "NO_PUBLICAR_GBP_PRODUCTO_NO_CONSULTABLE",
-                    "motivos": ["GBP_PRODUCTO_NO_CONSULTABLE"],
-                    "mensaje": str(exc),
-                    "duration_ms": int((time.perf_counter() - started) * 1000),
-                }
-            )
         validacion = self.validation_service.validar_publicacion(
             producto,
             exigir_item_web=False,
+            modo_manual_flexible=True,
         )
         self._persistir_producto_validado(producto, validacion)
 
@@ -672,6 +649,70 @@ class TiendaNubeImportService:
             producto.stock = None
         return producto
 
+
+    async def _obtener_producto_manual_flexible(
+        self,
+        *,
+        token: str,
+        item_id: str,
+        sku: str,
+    ) -> Producto:
+        """
+        Obtiene un producto para importación manual.
+
+        Si GBP no devuelve ficha completa o el normalizador no puede armar el
+        producto completo, se construye un Producto mínimo para permitir carga
+        manual con precio 0, stock 0 y descripción básica.
+        """
+
+        try:
+            return await self._obtener_producto_publicable(token=token, item_id=item_id)
+        except (GBPProductoNoConsultableError, DatoIncompletoError) as exc:
+            logger.warning(
+                "tn_import_producto_minimo_manual",
+                extra={
+                    "sku": sku,
+                    "item_id": str(item_id),
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+            return self._crear_producto_minimo_manual(
+                sku=sku,
+                item_id=str(item_id),
+                titulo=sku,
+            )
+
+    def _crear_producto_minimo_manual(
+        self,
+        *,
+        sku: str,
+        item_id: str,
+        titulo: str | None = None,
+    ) -> Producto:
+        """
+        Crea un Producto mínimo para publicación manual flexible.
+
+        Este fallback no se usa en auditoría ni importación masiva. El payload
+        resultante se genera con precio 0.00 y stock 0 para evitar ventas
+        accidentales hasta que se complete manualmente en Tienda Nube.
+        """
+
+        sku_final = str(sku or item_id).strip()
+        titulo_final = str(titulo or sku_final or f"Producto {item_id}").strip()
+
+        return Producto(
+            sku=sku_final,
+            id_sistema_gbp=str(item_id).strip(),
+            titulo=titulo_final,
+            publicable_web=None,
+            item_disabled=False,
+            item_not_for_sale=False,
+            descripcion_web=titulo_final,
+            imagenes=[],
+            precio_importado=None,
+            stock=None,
+        )
 
     def _persistir_producto_validado(self, producto, validacion) -> None:
         """Persiste producto, validacion y stock sin duplicar lógica."""
