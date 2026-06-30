@@ -50,6 +50,7 @@ class GBPClient:
         self.web_service_id = web_service_id
         self.timeout = httpx.Timeout(timeout_seconds)
 
+
     async def autenticar(self) -> str:
         """Autentica contra GBP y devuelve token temporal."""
 
@@ -102,15 +103,26 @@ class GBPClient:
         if not rows:
             return None
 
-        item_id = rows[0].get("item_id")
+        item_id = _get_first_value(
+            rows[0],
+            (
+                "item_id",
+                "Item_ID",
+                "ItemID",
+                "itemID",
+                "intItemID",
+                "intItem_id",
+                "id",
+            ),
+        )
 
         if not item_id:
             logger.warning(
                 "gbp_item_id_por_codigo_sin_item_id",
                 extra={
                     "sku": sku_normalizado,
-                    "row_keys": list(rows[0].keys()),
-                    "row_preview": rows[0],
+                    "row_keys": list(rows[0].keys()) if rows else [],
+                    "row_preview": rows[0] if rows else None,
                 },
             )
             return None
@@ -145,6 +157,134 @@ class GBPClient:
             )
 
         return rows[0]
+    
+    async def obtener_producto_basico_por_id(
+        self,
+        token: str,
+        item_id: int | str,
+    ) -> dict[str, str] | None:
+        """
+        Fallback para obtener datos mínimos del producto desde ItemBasicData_funGetXMLData.
+
+        Se usa cuando wsItem_funGetXMLDataById no devuelve ficha completa,
+        pero el producto sí existe en el catálogo básico.
+        """
+
+        catalogo = await self.obtener_catalogo_basico(token)
+        item_id_str = str(item_id).strip()
+
+        for row in catalogo:
+            row_item_id = _get_first_value(
+                row,
+                (
+                    "item_id",
+                    "Item_ID",
+                    "ItemID",
+                    "itemID",
+                    "intItemID",
+                    "intItem_id",
+                    "id",
+                ),
+            )
+
+            if str(row_item_id or "").strip() != item_id_str:
+                continue
+
+            item_code = _get_first_value(
+                row,
+                (
+                    "item_code",
+                    "ItemCode",
+                    "itemCode",
+                    "code",
+                    "Code",
+                    "codigo",
+                    "Codigo",
+                    "item_barcode",
+                    "item_vendorCode",
+                ),
+            )
+
+            item_desc = _get_first_value(
+                row,
+                (
+                    "item_desc",
+                    "ItemDesc",
+                    "itemDesc",
+                    "description",
+                    "Description",
+                    "descripcion",
+                    "Descripcion",
+                    "name",
+                    "Name",
+                ),
+            )
+
+            detalle_basico = {
+                **row,
+                "item_id": item_id_str,
+                "item_code": str(item_code or "").strip(),
+                "item_desc": str(item_desc or "").strip(),
+                "item_web": row.get("item_web", ""),
+                "item_disabled": row.get("item_disabled", "false"),
+                "item_not4Sale": row.get("item_not4Sale", "false"),
+            }
+
+            logger.info(
+                "gbp_producto_basico_por_id_ok",
+                extra={
+                    "item_id": item_id_str,
+                    "method": "ItemBasicData_funGetXMLData",
+                    "row_keys": list(row.keys()),
+                    "sku": detalle_basico.get("item_code"),
+                    "titulo": detalle_basico.get("item_desc"),
+                },
+            )
+
+            return detalle_basico
+
+        logger.warning(
+            "gbp_producto_basico_por_id_no_match",
+            extra={
+                "item_id": item_id_str,
+                "method": "ItemBasicData_funGetXMLData",
+                "catalogo_rows": len(catalogo),
+            },
+        )
+
+        return None
+    
+    async def obtener_producto_por_id_robusto(
+        self,
+        token: str,
+        item_id: int | str,
+    ) -> dict[str, str]:
+        """
+        Obtiene producto por item_id usando método principal y fallback.
+
+        1. wsItem_funGetXMLDataById
+        2. ItemBasicData_funGetXMLData
+        """
+
+        try:
+            return await self.obtener_producto_por_id(token, item_id)
+        except GBPProductoNoConsultableError:
+            logger.warning(
+                "gbp_producto_por_id_fallback_catalogo_basico",
+                extra={
+                    "item_id": str(item_id),
+                    "fallback_method": "ItemBasicData_funGetXMLData",
+                },
+            )
+
+        fallback = await self.obtener_producto_basico_por_id(token, item_id)
+
+        if fallback:
+            return fallback
+
+        raise GBPProductoNoConsultableError(
+            f"GBP no devolvió ficha completa ni ficha básica para item_id={item_id}"
+        )
 
     async def obtener_precio_por_item_id(
         self,
@@ -292,3 +432,21 @@ class GBPClient:
         if isinstance(value, bool):
             return "true" if value else "false"
         return escape(str(value))
+
+def _get_first_value(row: dict[str, Any], candidates: tuple[str, ...]) -> str | None:
+        if not row:
+            return None
+
+        for candidate in candidates:
+            value = row.get(candidate)
+            if value not in (None, ""):
+                return str(value).strip()
+
+        lower_map = {str(key).lower(): value for key, value in row.items()}
+
+        for candidate in candidates:
+            value = lower_map.get(candidate.lower())
+            if value not in (None, ""):
+                return str(value).strip()
+
+        return None

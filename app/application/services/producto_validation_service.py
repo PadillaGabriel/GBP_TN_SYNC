@@ -15,7 +15,12 @@ class ResultadoValidacionProducto(BaseModel):
 class ProductoValidationService:
     """Evalua si un producto GBP puede publicarse automaticamente."""
 
-    def validar_publicacion(self, producto: Producto) -> ResultadoValidacionProducto:
+    def validar_publicacion(
+        self,
+        producto: Producto,
+        *,
+        exigir_item_web: bool = True,
+    ) -> ResultadoValidacionProducto:
         motivos: list[str] = []
         cumple: list[str] = []
 
@@ -30,10 +35,13 @@ class ProductoValidationService:
         )
         if producto.publicable_web is True:
             cumple.append("item_web=true")
-        elif producto.publicable_web is False:
+        elif exigir_item_web and producto.publicable_web is False:
             motivos.append("ITEM_WEB_FALSE")
-        else:
+        elif exigir_item_web and producto.publicable_web is None:
             motivos.append("ITEM_WEB_NO_CONFIRMADO")
+        else:
+            cumple.append("item_web omitido por importacion manual")
+            
         self._check(not producto.item_disabled, "item_disabled=false", "ITEM_DISABLED", motivos, cumple)
         self._check(not producto.item_not_for_sale, "item_not4Sale=false", "ITEM_NOT_FOR_SALE", motivos, cumple)
         self._check(

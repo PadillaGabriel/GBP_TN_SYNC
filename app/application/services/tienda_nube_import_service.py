@@ -260,7 +260,10 @@ class TiendaNubeImportService:
                     "duration_ms": int((time.perf_counter() - started) * 1000),
                 }
             )
-        validacion = self.validation_service.validar_publicacion(producto)
+        validacion = self.validation_service.validar_publicacion(
+            producto,
+            exigir_item_web=False,
+        )
         self._persistir_producto_validado(producto, validacion)
 
         payload = self.payload_builder.build_product_payload(producto)
@@ -631,7 +634,7 @@ class TiendaNubeImportService:
         )
 
     async def _obtener_producto_publicable(self, *, token: str, item_id: str):
-        detalle = await self.gbp_client.obtener_producto_por_id(token, int(item_id))
+        detalle = await self.gbp_client.obtener_producto_por_id_robusto(token, int(item_id))
         imagenes = await self.gbp_client.obtener_imagenes_website_por_item_id(token, int(item_id))
         detalle = {**detalle, **self._imagenes_desde_website(imagenes)}
 
