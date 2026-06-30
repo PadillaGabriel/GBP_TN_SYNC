@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><soap:Body><wsGetWebSiteImagesURL4WebServicesResponse xmlns="http://microsoft.com/webservices/"><wsGetWebSiteImagesURL4WebServicesResult>&lt;NewDataSet&gt;
+  &lt;Table&gt;
+    &lt;item_WebSite_url4Image1&gt;http://http2.mlstatic.com/D_861977-MLA111748979911_052026-F.webp&lt;/item_WebSite_url4Image1&gt;
+    &lt;item_WebSite_url4Image2&gt;http://http2.mlstatic.com/D_980502-MLA111748920243_052026-F.webp&lt;/item_WebSite_url4Image2&gt;
+    &lt;item_WebSite_url4Image3&gt;http://http2.mlstatic.com/D_966749-MLA111748035005_052026-F.webp&lt;/item_WebSite_url4Image3&gt;
+    &lt;item_WebSite_url4Image4&gt;http://http2.mlstatic.com/D_634046-MLA110787044130_052026-F.webp&lt;/item_WebSite_url4Image4&gt;
+    &lt;item_WebSite_url4Image5&gt;http://http2.mlstatic.com/D_714755-MLA111749244941_052026-F.webp&lt;/item_WebSite_url4Image5&gt;
+    &lt;item_WebSite_url4Image6&gt;http://http2.mlstatic.com/D_922193-MLA111749155495_052026-F.jpg&lt;/item_WebSite_url4Image6&gt;
+    &lt;item_WebSite_url4Image7&gt;http://http2.mlstatic.com/D_962175-MLA111749244987_052026-F.jpg&lt;/item_WebSite_url4Image7&gt;
+    &lt;item_WebSite_url4Image8&gt;http://http2.mlstatic.com/D_711467-MLA110787044232_052026-F.webp&lt;/item_WebSite_url4Image8&gt;
+    &lt;item_WebSite_url4Image9&gt;http://http2.mlstatic.com/D_693956-MLA110787574718_052026-F.webp&lt;/item_WebSite_url4Image9&gt;
+    &lt;item_WebSite_url4Image10&gt;http://http2.mlstatic.com/D_822043-MLA110787897592_052026-F.jpg&lt;/item_WebSite_url4Image10&gt;
+  &lt;/Table&gt;
+&lt;/NewDataSet&gt;</wsGetWebSiteImagesURL4WebServicesResult></wsGetWebSiteImagesURL4WebServicesResponse></soap:Body></soap:Envelope>

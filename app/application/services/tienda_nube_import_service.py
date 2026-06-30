@@ -235,6 +235,11 @@ class TiendaNubeImportService:
             item_id=str(resolved_item_id),
             sku=sku or str(resolved_item_id),
         )
+        producto = await self._enriquecer_producto_manual_con_datos_disponibles(
+            producto,
+            token=token,
+            item_id=str(resolved_item_id),
+        )
 
         validacion = self.validation_service.validar_publicacion(
             producto,
@@ -261,6 +266,7 @@ class TiendaNubeImportService:
                     "motivos": validacion.motivos_bloqueo,
                     "precio": str(producto.precio_importado.monto) if producto.precio_importado else None,
                     "stock": producto.stock.cantidad if producto.stock else None,
+                    "imagenes": len(producto.imagenes),
                     "payload_preview": payload,
                     "descripcion_largo": len(producto.descripcion_web or ""),
                     "descripcion_preview": (producto.descripcion_web or "")[:300],
@@ -285,6 +291,7 @@ class TiendaNubeImportService:
                     "accion": "crear_o_actualizar_producto_manual",
                     "precio": str(producto.precio_importado.monto) if producto.precio_importado else None,
                     "stock": producto.stock.cantidad if producto.stock else None,
+                    "imagenes": len(producto.imagenes),
                     "payload_preview": payload,
                     "descripcion_largo": len(producto.descripcion_web or ""),
                     "descripcion_preview": (producto.descripcion_web or "")[:300],
@@ -337,6 +344,7 @@ class TiendaNubeImportService:
                 "tn_variant_id": tn_variant_id,
                 "precio": str(producto.precio_importado.monto) if producto.precio_importado else None,
                 "stock": producto.stock.cantidad if producto.stock else None,
+                "imagenes": len(producto.imagenes),
                 "descripcion_largo": len(producto.descripcion_web or ""),
                 "duration_ms": int((time.perf_counter() - started) * 1000),
             }
@@ -635,7 +643,7 @@ class TiendaNubeImportService:
         stock_rows = await self.gbp_client.obtener_stock_por_item_id(
             token,
             item_id=int(item_id),
-            storage_id=-1,
+            storage_id=self.settings.ecommerce_primary_storage_id,
         )
         try:
             producto.stock = self.normalizer.normalizar_stock_desde_filas(
@@ -682,6 +690,113 @@ class TiendaNubeImportService:
                 item_id=str(item_id),
                 titulo=sku,
             )
+
+    async def _enriquecer_producto_manual_con_datos_disponibles(
+        self,
+        producto: Producto,
+        *,
+        token: str,
+        item_id: str,
+    ) -> Producto:
+        """
+        Enriquece un producto manual con fuentes GBP especializadas.
+
+        Este paso es tolerante: precio, stock e imágenes se consultan aunque
+        wsItem_funGetXMLDataById no haya devuelto ficha completa. Ninguna de
+        estas fallas debe cortar una importación manual; se registran como
+        warning/error en logs y la validación flexible decide qué informar.
+        """
+
+        item_id_int = int(item_id)
+
+        try:
+            imagenes = await self.gbp_client.obtener_imagenes_website_por_item_id(
+                token,
+                item_id_int,
+            )
+            data_imagenes = self._imagenes_desde_website(imagenes)
+            if data_imagenes:
+                producto.imagenes = self.normalizer._normalizar_imagenes(data_imagenes)
+                logger.info(
+                    "tn_import_manual_imagenes_parciales_ok",
+                    extra={
+                        "sku": producto.sku,
+                        "item_id": str(item_id),
+                        "imagenes": len(producto.imagenes),
+                    },
+                )
+        except Exception:  # noqa: BLE001 - importación manual no debe cortar por imagen.
+            logger.exception(
+                "tn_import_manual_imagenes_parciales_failed",
+                extra={"sku": producto.sku, "item_id": str(item_id)},
+            )
+
+        try:
+            precio_rows = await self.gbp_client.obtener_precio_por_item_id(
+                token,
+                item_id=item_id_int,
+                price_list_id=self.settings.online_price_list_id,
+            )
+            precio = self.normalizer.normalizar_precio(
+                precio_rows,
+                price_list_id=self.settings.online_price_list_id,
+            )
+            if precio is not None:
+                producto.precio_importado = precio
+                logger.info(
+                    "tn_import_manual_precio_parcial_ok",
+                    extra={
+                        "sku": producto.sku,
+                        "item_id": str(item_id),
+                        "price_list_id": self.settings.online_price_list_id,
+                        "precio": str(precio.monto),
+                    },
+                )
+        except Exception:  # noqa: BLE001 - importación manual no debe cortar por precio.
+            logger.exception(
+                "tn_import_manual_precio_parcial_failed",
+                extra={
+                    "sku": producto.sku,
+                    "item_id": str(item_id),
+                    "price_list_id": self.settings.online_price_list_id,
+                },
+            )
+
+        try:
+            storage_id = self.settings.ecommerce_primary_storage_id
+            stock_rows = await self.gbp_client.obtener_stock_por_item_id(
+                token,
+                item_id=item_id_int,
+                storage_id=storage_id,
+            )
+            producto.stock = self.normalizer.normalizar_stock_desde_filas(
+                stock_rows,
+                sku=producto.sku,
+                id_sistema_gbp=str(item_id),
+                ecommerce_storage_ids=self.settings.ecommerce_storage_id_list,
+            )
+            logger.info(
+                "tn_import_manual_stock_parcial_ok",
+                extra={
+                    "sku": producto.sku,
+                    "item_id": str(item_id),
+                    "stock": producto.stock.cantidad if producto.stock else None,
+                    "ecommerce_storage_ids": self.settings.ecommerce_storage_id_list,
+                    "storage_id": storage_id,
+                },
+            )
+        except Exception:  # noqa: BLE001 - importación manual no debe cortar por stock.
+            logger.exception(
+                "tn_import_manual_stock_parcial_failed",
+                extra={
+                    "sku": producto.sku,
+                    "item_id": str(item_id),
+                    "ecommerce_storage_ids": self.settings.ecommerce_storage_id_list,
+                    "storage_id": self.settings.ecommerce_primary_storage_id,
+                },
+            )
+
+        return producto
 
     def _crear_producto_minimo_manual(
         self,

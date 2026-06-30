@@ -77,6 +77,21 @@ class Settings(BaseSettings):
 
         return [item.strip() for item in self.ecommerce_storage_ids.split(",") if item.strip()]
 
+    @property
+    def ecommerce_primary_storage_id(self) -> int:
+        """Devuelve el primer deposito ecommerce configurado para consultas puntuales.
+
+        Si no hay deposito configurado o no puede convertirse a entero, usa -1
+        para consultar todos los depositos disponibles en GBP.
+        """
+
+        for item in self.ecommerce_storage_id_list:
+            try:
+                return int(str(item).strip())
+            except (TypeError, ValueError):
+                continue
+        return -1
+
 
 @lru_cache
 def get_settings() -> Settings:

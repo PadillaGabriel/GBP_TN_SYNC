@@ -54,3 +54,44 @@ def test_item_web_false_y_no_confirmado_tienen_motivos_diferentes() -> None:
     assert "ITEM_WEB_NO_CONFIRMADO" in ProductoValidationService().validar_publicacion(
         producto_none
     ).motivos_bloqueo
+
+
+def test_manual_flexible_no_bloquea_por_datos_web_operativos_faltantes() -> None:
+    producto = Producto(
+        sku="536HUELLAS",
+        id_sistema_gbp="13170",
+        titulo="536HUELLAS",
+        publicable_web=None,
+        descripcion_web="536HUELLAS",
+        precio_importado=None,
+        imagenes=[],
+        stock=None,
+    )
+
+    resultado = ProductoValidationService().validar_publicacion(
+        producto,
+        exigir_item_web=False,
+        modo_manual_flexible=True,
+    )
+
+    assert resultado.publicable is True
+    assert resultado.decision == "PUBLICABLE_AUTOMATICO"
+    assert resultado.motivos_bloqueo == []
+    assert "item_web omitido por importacion manual" in resultado.cumple
+    assert "Precio online omitido por importacion manual" in resultado.cumple
+    assert "Stock omitido por importacion manual" in resultado.cumple
+
+
+def test_manual_flexible_permite_stock_cero_si_es_consultable() -> None:
+    producto = _producto_base(0)
+    producto.publicable_web = None
+
+    resultado = ProductoValidationService().validar_publicacion(
+        producto,
+        exigir_item_web=False,
+        modo_manual_flexible=True,
+    )
+
+    assert resultado.publicable is True
+    assert "STOCK_SIN_DISPONIBLE" not in resultado.motivos_bloqueo
+    assert "Stock 0 permitido por importacion manual" in resultado.cumple

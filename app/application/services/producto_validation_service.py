@@ -68,8 +68,17 @@ class ProductoValidationService:
                 motivos,
                 cumple,
             )
-        if modo_manual_flexible and producto.stock is None:
-            cumple.append("Stock omitido por importacion manual")
+        if modo_manual_flexible:
+            if producto.stock is None:
+                cumple.append("Stock omitido por importacion manual")
+            elif producto.stock.consultable:
+                cumple.append("Stock disponible consultable")
+                if producto.stock.cantidad > 0:
+                    cumple.append("Stock mayor a 0")
+                else:
+                    cumple.append("Stock 0 permitido por importacion manual")
+            else:
+                cumple.append("Stock no consultable omitido por importacion manual")
         else:
             self._check(
                 producto.stock is not None and producto.stock.consultable,
