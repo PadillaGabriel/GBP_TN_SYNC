@@ -12,3 +12,10 @@ class DatoIncompletoError(IntegradorError):
 
 class SincronizacionError(IntegradorError):
     """Error controlado durante una sincronización."""
+
+class GBPProductoNoConsultableError(IntegradorError):
+    """GBP resolvió el producto, pero no devolvió ficha completa consultable."""
+
+
+class GBPSkuNoResueltoError(IntegradorError):
+    """GBP no devolvió item_id para el SKU informado."""

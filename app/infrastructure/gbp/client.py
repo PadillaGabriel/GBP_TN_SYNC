@@ -8,6 +8,7 @@ from xml.sax.saxutils import escape
 
 import httpx
 
+from app.domain.errors import GBPProductoNoConsultableError
 from app.infrastructure.gbp.xml_parser import (
     decode_gbp_response,
     extract_result_text,
@@ -74,15 +75,47 @@ class GBPClient:
     async def obtener_item_id_por_codigo(self, token: str, sku: str) -> str | None:
         """Resuelve código/SKU GBP a item_id interno."""
 
+        sku_normalizado = str(sku or "").strip()
+
+        if not sku_normalizado:
+            return None
+
         call = await self.call_soap_method(
             "wsgetItemIDfromCode_funGetXMLData",
             token=token,
-            params={"strItemCode": sku},
+            params={"strItemCode": sku_normalizado},
         )
+
         rows = parse_dataset_tables(call.result_text)
+
+        logger.info(
+            "gbp_item_id_por_codigo_result",
+            extra={
+                "sku": sku_normalizado,
+                "method": "wsgetItemIDfromCode_funGetXMLData",
+                "rows": len(rows),
+                "result_len": len(call.result_text or ""),
+                "result_preview": (call.result_text or "")[:300],
+            },
+        )
+
         if not rows:
             return None
-        return rows[0].get("item_id")
+
+        item_id = rows[0].get("item_id")
+
+        if not item_id:
+            logger.warning(
+                "gbp_item_id_por_codigo_sin_item_id",
+                extra={
+                    "sku": sku_normalizado,
+                    "row_keys": list(rows[0].keys()),
+                    "row_preview": rows[0],
+                },
+            )
+            return None
+
+        return item_id
 
     async def obtener_producto_por_id(self, token: str, item_id: int | str) -> dict[str, str]:
         """Obtiene ficha completa de un producto por item_id GBP."""
@@ -92,9 +125,25 @@ class GBPClient:
             token=token,
             params={"intItemID": int(item_id)},
         )
+
         rows = parse_dataset_tables(call.result_text)
+
+        logger.info(
+            "gbp_producto_por_id_result",
+            extra={
+                "item_id": str(item_id),
+                "method": "wsItem_funGetXMLDataById",
+                "rows": len(rows),
+                "result_len": len(call.result_text or ""),
+                "result_preview": (call.result_text or "")[:300],
+            },
+        )
+
         if not rows:
-            raise RuntimeError(f"GBP no devolvió datos para item_id={item_id}")
+            raise GBPProductoNoConsultableError(
+                f"GBP no devolvió ficha completa para item_id={item_id}"
+            )
+
         return rows[0]
 
     async def obtener_precio_por_item_id(
@@ -190,7 +239,12 @@ class GBPClient:
 
         logger.info(
             "gbp_soap_call_ok",
-            extra={"method": method_name, "duration_ms": duration_ms},
+            extra={
+                "method": method_name,
+                "duration_ms": duration_ms,
+                "result_len": len(result_text or ""),
+                "result_preview": (result_text or "")[:250],
+            },
         )
         return GBPCallResult(result_text=result_text, duration_ms=duration_ms)
 

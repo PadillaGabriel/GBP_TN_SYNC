@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.application.services.producto_validation_service import ProductoValidationService
+from app.domain.errors import GBPProductoNoConsultableError, GBPSkuNoResueltoError
 from app.infrastructure.gbp.client import GBPClient
 from app.infrastructure.gbp.normalizer import GBPNormalizer
 from app.infrastructure.gbp.xml_parser import normalizar_objeto_gbp
@@ -211,9 +212,54 @@ class TiendaNubeImportService:
         if resolved_item_id is None and sku:
             resolved_item_id = await self.gbp_client.obtener_item_id_por_codigo(token, sku)
         if resolved_item_id in (None, ""):
-            raise ValueError(f"GBP no devolvio item_id para sku={sku}")
+            return normalizar_objeto_gbp(
+                {
+                    "ok": True,
+                    "dry_run": self.settings.dry_run,
+                    "confirm": confirm,
+                    "forzar": forzar,
+                    "ejecuta_tienda_nube": False,
+                    "sku": sku,
+                    "id_sistema_gbp": None,
+                    "estado": "BLOQUEADO",
+                    "decision": "NO_PUBLICAR_SKU_NO_RESUELTO",
+                    "motivos": ["SKU_NO_RESUELTO"],
+                    "mensaje": f"GBP no devolvió item_id para sku={sku}",
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                }
+            )
 
-        producto = await self._obtener_producto_publicable(token=token, item_id=str(resolved_item_id))
+        try:
+            producto = await self._obtener_producto_publicable(
+                token=token,
+                item_id=str(resolved_item_id),
+            )
+        except GBPProductoNoConsultableError as exc:
+            logger.warning(
+                "tn_import_producto_no_consultable",
+                extra={
+                    "sku": sku,
+                    "item_id": str(resolved_item_id),
+                    "error": str(exc),
+                },
+            )
+
+            return normalizar_objeto_gbp(
+                {
+                    "ok": True,
+                    "dry_run": self.settings.dry_run,
+                    "confirm": confirm,
+                    "forzar": forzar,
+                    "ejecuta_tienda_nube": False,
+                    "sku": sku,
+                    "id_sistema_gbp": str(resolved_item_id),
+                    "estado": "BLOQUEADO",
+                    "decision": "NO_PUBLICAR_GBP_PRODUCTO_NO_CONSULTABLE",
+                    "motivos": ["GBP_PRODUCTO_NO_CONSULTABLE"],
+                    "mensaje": str(exc),
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                }
+            )
         validacion = self.validation_service.validar_publicacion(producto)
         self._persistir_producto_validado(producto, validacion)
 
