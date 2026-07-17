@@ -1,21 +1,25 @@
 from __future__ import annotations
 
 import asyncio
-import re
-import unicodedata
 from typing import Any
 
 from app.domain.models.producto import Producto
 from app.domain.models.stock import StockProducto
 from app.domain.models.sync_result import SyncResult
 from app.domain.ports.publicador_ecommerce import PublicadorEcommerce
-from app.infrastructure.tienda_nube.client import TiendaNubeClient
 from app.infrastructure.tienda_nube.category_utils import normalize_category_key
+from app.infrastructure.tienda_nube.client import TiendaNubeClient
 from app.infrastructure.tienda_nube.payload_builder import TiendaNubePayloadBuilder
 
 
 class TiendaNubeAdapter(PublicadorEcommerce):
-    """Adaptador de Tienda Nube hacia contrato interno."""
+    """Adaptador de Tienda Nube hacia contrato interno.
+
+    La actualización se divide por recurso:
+    - producto: nombre, descripción, categorías, publicación;
+    - variante: SKU, precio, stock, barcode;
+    - imágenes: solo en creación para evitar duplicados y 422 en updates.
+    """
 
     _category_lock = asyncio.Lock()
 
@@ -35,29 +39,64 @@ class TiendaNubeAdapter(PublicadorEcommerce):
         )
 
     async def crear_o_actualizar_producto(self, producto: Producto) -> SyncResult:
-        """Crea o actualiza producto completo en Tienda Nube."""
+        """Crea o actualiza producto completo en Tienda Nube de forma segura."""
 
         existing = await self.client.get_product_by_sku(producto.sku)
         category_ids = await self._ensure_category_tree(producto)
-        payload = self.builder.build_product_payload(producto, category_ids=category_ids)
+
         if existing is None:
+            payload = self.builder.build_create_product_payload(producto, category_ids=category_ids)
             created = await self.client.create_product(payload)
             return SyncResult(
                 exitoso=True,
                 accion="crear_producto",
                 sku=producto.sku,
                 mensaje="Producto creado en Tienda Nube",
-                detalles={"tn_product": created, "category_ids": category_ids},
+                detalles={
+                    "tn_product": created,
+                    "category_ids": category_ids,
+                    "product_payload": payload,
+                },
             )
 
         product_id = str(existing["id"])
-        updated = await self.client.update_product(product_id, payload)
+        product_payload = self.builder.build_update_product_payload(producto, category_ids=category_ids)
+        updated_product = await self.client.update_product(product_id, product_payload)
+
+        variant_payload = self.builder.build_update_variant_payload(producto)
+        target_variant = self._select_variant(existing, sku=producto.sku)
+        updated_variant: dict[str, Any] | None = None
+        variant_action = "sin_variante"
+
+        if target_variant is not None:
+            variant_id = str(target_variant["id"])
+            updated_variant = await self.client.update_variant(
+                product_id=product_id,
+                variant_id=variant_id,
+                payload=variant_payload,
+            )
+            variant_action = "actualizar_variante"
+        else:
+            # Caso defensivo: un producto existente sin variantes no puede quedar
+            # sin variante operativa si queremos sincronizar precio/stock.
+            create_variant_payload = self.builder.build_create_variant_payload(producto)
+            updated_variant = await self.client.create_variant(product_id, create_variant_payload)
+            variant_action = "crear_variante"
+
+        tn_product = self._merge_product_with_variant(updated_product or existing, updated_variant)
         return SyncResult(
             exitoso=True,
             accion="actualizar_producto",
             sku=producto.sku,
-            mensaje="Producto actualizado en Tienda Nube",
-            detalles={"tn_product": updated, "category_ids": category_ids},
+            mensaje="Producto y variante actualizados en Tienda Nube",
+            detalles={
+                "tn_product": tn_product,
+                "tn_variant": updated_variant,
+                "category_ids": category_ids,
+                "product_payload": product_payload,
+                "variant_payload": variant_payload,
+                "variant_action": variant_action,
+            },
         )
 
     async def actualizar_stock(self, stock: StockProducto) -> SyncResult:
@@ -72,8 +111,8 @@ class TiendaNubeAdapter(PublicadorEcommerce):
                 mensaje="Producto no encontrado en Tienda Nube",
             )
 
-        variants = existing.get("variants", [])
-        if not variants:
+        variant = self._select_variant(existing, sku=stock.sku)
+        if variant is None:
             return SyncResult(
                 exitoso=False,
                 accion="actualizar_stock",
@@ -82,7 +121,7 @@ class TiendaNubeAdapter(PublicadorEcommerce):
             )
 
         product_id = str(existing["id"])
-        variant_id = str(variants[0]["id"])
+        variant_id = str(variant["id"])
         updated = await self.client.update_variant_stock(
             product_id=product_id,
             variant_id=variant_id,
@@ -95,6 +134,49 @@ class TiendaNubeAdapter(PublicadorEcommerce):
             mensaje="Stock actualizado en Tienda Nube",
             detalles={"tn_variant": updated},
         )
+
+    @staticmethod
+    def _select_variant(product: dict[str, Any], *, sku: str) -> dict[str, Any] | None:
+        variants = product.get("variants") or []
+        if not isinstance(variants, list) or not variants:
+            return None
+
+        sku_target = str(sku or "").strip().casefold()
+        for variant in variants:
+            if not isinstance(variant, dict):
+                continue
+            if str(variant.get("sku") or "").strip().casefold() == sku_target:
+                return variant
+
+        for variant in variants:
+            if isinstance(variant, dict) and variant.get("id") not in (None, ""):
+                return variant
+        return None
+
+    @staticmethod
+    def _merge_product_with_variant(
+        product: dict[str, Any] | None,
+        variant: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        merged = dict(product or {})
+        if variant is not None:
+            existing_variants = merged.get("variants")
+            if isinstance(existing_variants, list) and existing_variants:
+                variant_id = str(variant.get("id") or "")
+                replaced = False
+                new_variants: list[dict[str, Any]] = []
+                for item in existing_variants:
+                    if isinstance(item, dict) and str(item.get("id") or "") == variant_id:
+                        new_variants.append(variant)
+                        replaced = True
+                    elif isinstance(item, dict):
+                        new_variants.append(item)
+                if not replaced:
+                    new_variants.insert(0, variant)
+                merged["variants"] = new_variants
+            else:
+                merged["variants"] = [variant]
+        return merged
 
     async def _ensure_category_tree(self, producto: Producto) -> list[int]:
         """Asegura categoria y subcategoria sin duplicar por concurrencia.

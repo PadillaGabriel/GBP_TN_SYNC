@@ -7,6 +7,7 @@ from app.application.services.gbp_audit_service import GBPAuditService
 from app.application.services.stock_sync_service import StockSyncService
 from app.application.services.tienda_nube_category_service import TiendaNubeCategoryService
 from app.application.services.tienda_nube_import_service import TiendaNubeImportService
+from app.domain.errors import TiendaNubeHTTPError
 from app.infrastructure.persistence.database import SessionLocal
 from app.infrastructure.persistence.repositories import ProductoRepository, SyncAuditRepository, SyncJobRepository
 from app.settings import get_settings
@@ -487,6 +488,23 @@ async def ejecutar_job_importar_sku(
                 "descripcion_largo": result.get("descripcion_largo"),
                 "ejecuta_tienda_nube": result.get("ejecuta_tienda_nube"),
                 "dry_run": result.get("dry_run"),
+            },
+        )
+    except TiendaNubeHTTPError as exc:
+        logger.exception("job_importar_sku_tienda_nube_http_error", extra={"job_id": job_id, "sku": sku})
+        _update_job(
+            job_id,
+            estado="ERROR",
+            finalizar=True,
+            error_codigo=type(exc).__name__,
+            progreso={
+                "mensaje": f"Tienda Nube HTTP {exc.status_code}: {exc.response_text[:500]}",
+                "porcentaje": 100,
+                "sku": sku,
+                "tn_status_code": exc.status_code,
+                "tn_url": exc.url,
+                "tn_response": exc.response_text[:4000],
+                "tn_request": (exc.request_body or "")[:4000],
             },
         )
     except Exception as exc:  # noqa: BLE001

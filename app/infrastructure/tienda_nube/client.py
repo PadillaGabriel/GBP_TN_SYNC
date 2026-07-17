@@ -1,11 +1,26 @@
+from __future__ import annotations
+
 import asyncio
+import json
+import logging
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
+from app.domain.errors import TiendaNubeHTTPError
+
+logger = logging.getLogger(__name__)
+
 
 class TiendaNubeClient:
-    """Cliente HTTP de bajo nivel para Tienda Nube."""
+    """Cliente HTTP de bajo nivel para Tienda Nube.
+
+    Responsabilidades:
+    - Encapsular autenticación, timeouts y backoff.
+    - Exponer métodos explícitos por recurso: producto, variante, stock y categorías.
+    - Enriquecer errores HTTP con request/response para que los 422 no queden como caja negra.
+    """
 
     def __init__(
         self,
@@ -20,6 +35,15 @@ class TiendaNubeClient:
         self.access_token = access_token
         self.timeout = httpx.Timeout(timeout_seconds)
 
+    @property
+    def headers(self) -> dict[str, str]:
+        """Headers obligatorios de Tienda Nube."""
+
+        return {
+            "Authentication": f"bearer {self.access_token}",
+            "Content-Type": "application/json",
+            "User-Agent": "Silmar Integrador GBP TN",
+        }
 
     async def _request_with_retries(
         self,
@@ -58,27 +82,68 @@ class TiendaNubeClient:
         assert response is not None
         return response
 
-    @property
-    def headers(self) -> dict[str, str]:
-        """Headers obligatorios de Tienda Nube."""
+    @staticmethod
+    def _safe_json_text(payload: Any) -> str | None:
+        if payload is None:
+            return None
+        try:
+            return json.dumps(payload, ensure_ascii=False, default=str)
+        except TypeError:
+            return str(payload)
 
-        return {
-            "Authentication": f"bearer {self.access_token}",
-            "Content-Type": "application/json",
-            "User-Agent": "Silmar Integrador GBP TN",
-        }
+    def _raise_for_status(
+        self,
+        response: httpx.Response,
+        *,
+        request_payload: Any = None,
+    ) -> None:
+        """Levanta errores HTTP con cuerpo de respuesta y payload.
+
+        httpx.HTTPStatusError oculta el detalle más útil de Tienda Nube si no se
+        captura `response.text`. Para 422 necesitamos saber exactamente qué campo
+        rechazó la API.
+        """
+
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            request_body = self._safe_json_text(request_payload)
+            response_text = response.text or ""
+            logger.error(
+                "tienda_nube_http_error",
+                extra={
+                    "method": exc.request.method,
+                    "url": str(exc.request.url),
+                    "status_code": response.status_code,
+                    "response_text": response_text[:4000],
+                    "request_body": (request_body or "")[:4000],
+                },
+            )
+            raise TiendaNubeHTTPError(
+                status_code=response.status_code,
+                url=str(exc.request.url),
+                response_text=response_text,
+                request_body=request_body,
+            ) from exc
+
+    @staticmethod
+    def _json_or_empty(response: httpx.Response) -> dict[str, Any]:
+        if not response.content:
+            return {}
+        data = response.json()
+        return data if isinstance(data, dict) else {"data": data}
 
     async def get_product_by_sku(self, sku: str) -> dict[str, Any] | None:
         """Busca producto por SKU."""
 
-        url = f"{self.base_url}/{self.store_id}/products/sku/{sku}"
+        encoded_sku = quote(str(sku), safe="")
+        url = f"{self.base_url}/{self.store_id}/products/sku/{encoded_sku}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await self._request_with_retries(client, "GET", url, headers=self.headers)
             if response.status_code == 404:
                 return None
-            response.raise_for_status()
+            self._raise_for_status(response)
             return response.json()
-
 
     async def get_product(self, product_id: str) -> dict[str, Any] | None:
         """Obtiene producto por ID; devuelve None si no existe."""
@@ -88,7 +153,7 @@ class TiendaNubeClient:
             response = await self._request_with_retries(client, "GET", url, headers=self.headers)
             if response.status_code == 404:
                 return None
-            response.raise_for_status()
+            self._raise_for_status(response)
             return response.json()
 
     async def create_product(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -97,16 +162,40 @@ class TiendaNubeClient:
         url = f"{self.base_url}/{self.store_id}/products"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await self._request_with_retries(client, "POST", url, headers=self.headers, json=payload)
-            response.raise_for_status()
+            self._raise_for_status(response, request_payload=payload)
             return response.json()
 
     async def update_product(self, product_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Actualiza producto en Tienda Nube."""
+        """Actualiza datos de producto. No usar para precio/stock de variantes."""
 
         url = f"{self.base_url}/{self.store_id}/products/{product_id}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await self._request_with_retries(client, "PUT", url, headers=self.headers, json=payload)
-            response.raise_for_status()
+            self._raise_for_status(response, request_payload=payload)
+            return response.json()
+
+    async def create_variant(self, product_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Crea variante para producto existente."""
+
+        url = f"{self.base_url}/{self.store_id}/products/{product_id}/variants"
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await self._request_with_retries(client, "POST", url, headers=self.headers, json=payload)
+            self._raise_for_status(response, request_payload=payload)
+            return response.json()
+
+    async def update_variant(
+        self,
+        *,
+        product_id: str,
+        variant_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Actualiza precio/SKU/barcode/stock de una variante."""
+
+        url = f"{self.base_url}/{self.store_id}/products/{product_id}/variants/{variant_id}"
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await self._request_with_retries(client, "PUT", url, headers=self.headers, json=payload)
+            self._raise_for_status(response, request_payload=payload)
             return response.json()
 
     async def hide_product(self, product_id: str) -> dict[str, Any]:
@@ -115,17 +204,21 @@ class TiendaNubeClient:
         return await self.update_product(product_id, {"published": False})
 
     async def delete_product(self, product_id: str) -> dict[str, Any]:
-        """Elimina un producto en Tienda Nube."""
+        """Elimina un producto de Tienda Nube."""
 
         url = f"{self.base_url}/{self.store_id}/products/{product_id}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await self._request_with_retries(client, "DELETE", url, headers=self.headers)
             if response.status_code == 404:
                 return {"id": product_id, "estado": "NO_EXISTE_EN_TIENDA_NUBE"}
-            response.raise_for_status()
+            self._raise_for_status(response)
             if not response.content:
                 return {"id": product_id, "estado": "ELIMINADO"}
-            return response.json()
+            data = response.json()
+            if isinstance(data, dict):
+                data.setdefault("estado", "ELIMINADO")
+                return data
+            return {"id": product_id, "estado": "ELIMINADO"}
 
     async def list_categories(self, *, per_page: int = 200, max_pages: int = 10) -> list[dict[str, Any]]:
         """Lista categorias de Tienda Nube con paginacion defensiva."""
@@ -143,7 +236,7 @@ class TiendaNubeClient:
                 )
                 if response.status_code == 404 and page > 1:
                     break
-                response.raise_for_status()
+                self._raise_for_status(response)
                 data = response.json()
                 if not isinstance(data, list) or not data:
                     break
@@ -158,9 +251,8 @@ class TiendaNubeClient:
         url = f"{self.base_url}/{self.store_id}/categories"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await self._request_with_retries(client, "POST", url, headers=self.headers, json=payload)
-            response.raise_for_status()
+            self._raise_for_status(response, request_payload=payload)
             return response.json()
-
 
     async def list_products(self, *, per_page: int = 200, max_pages: int = 100) -> list[dict[str, Any]]:
         """Lista productos de Tienda Nube con paginacion defensiva."""
@@ -178,7 +270,7 @@ class TiendaNubeClient:
                 )
                 if response.status_code == 404 and page > 1:
                     break
-                response.raise_for_status()
+                self._raise_for_status(response)
                 data = response.json()
                 if not isinstance(data, list) or not data:
                     break
@@ -192,7 +284,6 @@ class TiendaNubeClient:
 
         return await self.update_product(product_id, {"categories": category_ids})
 
-
     async def delete_category(self, category_id: str) -> dict[str, Any]:
         """Elimina una categoría de Tienda Nube si existe."""
 
@@ -201,7 +292,7 @@ class TiendaNubeClient:
             response = await self._request_with_retries(client, "DELETE", url, headers=self.headers)
             if response.status_code == 404:
                 return {"id": category_id, "estado": "NO_EXISTE_EN_TIENDA_NUBE"}
-            response.raise_for_status()
+            self._raise_for_status(response)
             if not response.content:
                 return {"id": category_id, "estado": "ELIMINADO"}
             data = response.json()
@@ -213,19 +304,15 @@ class TiendaNubeClient:
     async def update_variant_stock(self, *, product_id: str, variant_id: str, stock: int) -> dict[str, Any]:
         """Actualiza solo stock de una variante de un producto."""
 
-        url = f"{self.base_url}/{self.store_id}/products/{product_id}/variants/{variant_id}"
-        payload = {"stock": stock}
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await self._request_with_retries(client, "PUT", url, headers=self.headers, json=payload)
-            response.raise_for_status()
-            return response.json()
+        payload = {"stock": max(0, int(stock)), "stock_management": True}
+        return await self.update_variant(product_id=product_id, variant_id=variant_id, payload=payload)
 
     async def update_stock(self, variant_id: str, stock: int) -> dict[str, Any]:
         """Compatibilidad legacy. No usar para flujo nuevo: falta product_id."""
 
         url = f"{self.base_url}/{self.store_id}/products/variants/{variant_id}"
-        payload = {"stock": stock}
+        payload = {"stock": max(0, int(stock)), "stock_management": True}
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await self._request_with_retries(client, "PUT", url, headers=self.headers, json=payload)
-            response.raise_for_status()
+            self._raise_for_status(response, request_payload=payload)
             return response.json()

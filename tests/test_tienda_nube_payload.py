@@ -94,3 +94,45 @@ def test_payload_escapes_description_html_to_avoid_raw_markup():
 
     assert "<script>" not in payload["description"]["es"]
     assert "&lt;script&gt;alert(1)&lt;/script&gt; &amp; mas" in payload["description"]["es"]
+
+
+def test_update_product_payload_does_not_include_variants_or_images():
+    producto = Producto(
+        sku="SKU1",
+        id_sistema_gbp="1",
+        titulo="Producto",
+        descripcion_web="Descripcion",
+        precio_importado=PrecioProducto(monto=Decimal("123.456")),
+        stock=StockProducto(sku="SKU1", id_sistema_gbp="1", cantidad=7),
+    )
+
+    payload = TiendaNubePayloadBuilder().build_update_product_payload(producto, category_ids=[1])
+
+    assert payload == {
+        "name": {"es": "Producto"},
+        "description": {"es": "<p>Descripcion</p>"},
+        "categories": [1],
+    }
+    assert "variants" not in payload
+    assert "images" not in payload
+
+
+def test_update_variant_payload_does_not_zero_missing_price_or_stock():
+    producto = Producto(sku="SKU1", id_sistema_gbp="1", titulo="Producto")
+
+    payload = TiendaNubePayloadBuilder().build_update_variant_payload(producto)
+
+    assert payload == {"sku": "SKU1"}
+
+
+def test_create_variant_payload_uses_safe_defaults_when_missing_data():
+    producto = Producto(sku="SKU1", id_sistema_gbp="1", titulo="Producto")
+
+    payload = TiendaNubePayloadBuilder().build_create_variant_payload(producto)
+
+    assert payload == {
+        "sku": "SKU1",
+        "price": "0.00",
+        "stock_management": True,
+        "stock": 0,
+    }
