@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 
@@ -14,7 +13,7 @@ def verificar_firma_webhook(
     firma_recibida: str | None,
     secreto: str,
 ) -> None:
-    """Valida ``x-linkedstore-hmac-sha256`` usando HMAC-SHA256 en base64."""
+    """Valida ``x-linkedstore-hmac-sha256`` usando HMAC-SHA256 hexadecimal."""
 
     firma = str(firma_recibida or "").strip()
     secreto_normalizado = str(secreto or "").strip()
@@ -27,13 +26,12 @@ def verificar_firma_webhook(
             "Falta el encabezado x-linkedstore-hmac-sha256"
         )
 
-    digest = hmac.new(
+    esperada = hmac.new(
         secreto_normalizado.encode("utf-8"),
         cuerpo,
         hashlib.sha256,
-    ).digest()
-    esperada = base64.b64encode(digest).decode("ascii")
-    if not hmac.compare_digest(esperada, firma):
+    ).hexdigest()
+    if not hmac.compare_digest(esperada, firma.lower()):
         raise FirmaWebhookTiendaNubeInvalidaError(
             "Firma de webhook Tiendanube inválida"
         )

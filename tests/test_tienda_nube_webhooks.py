@@ -1,4 +1,3 @@
-import base64
 import hashlib
 import hmac
 
@@ -11,8 +10,7 @@ from app.infraestructura.tienda_nube.webhooks import (
 
 
 def _firma(cuerpo: bytes, secreto: str) -> str:
-    digest = hmac.new(secreto.encode(), cuerpo, hashlib.sha256).digest()
-    return base64.b64encode(digest).decode()
+    return hmac.new(secreto.encode(), cuerpo, hashlib.sha256).hexdigest()
 
 
 def test_verificar_firma_webhook_valida() -> None:
