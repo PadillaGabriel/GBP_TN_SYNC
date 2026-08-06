@@ -1,4 +1,4 @@
-from app.application.services.hash_service import stable_hash
+from app.aplicacion.servicios.servicio_hash import stable_hash
 
 
 def test_stable_hash_no_depende_del_orden_de_claves() -> None:

@@ -1,12 +1,12 @@
 from decimal import Decimal
 
-from app.domain.models.precio import PrecioProducto
-from app.domain.models.producto import Producto
-from app.domain.models.stock import StockProducto
-from app.infrastructure.tienda_nube.adapter import TiendaNubeAdapter
+from app.dominio.modelos.precio import PrecioProducto
+from app.dominio.modelos.producto import Producto
+from app.dominio.modelos.stock import StockProducto
+from app.infraestructura.tienda_nube.adaptador import AdaptadorTiendaNube
 
 
-class FakeUpdateTiendaNubeClient:
+class FakeUpdateClienteTiendaNube:
     def __init__(self) -> None:
         self.product_payload = None
         self.variant_payload = None
@@ -33,7 +33,11 @@ class FakeUpdateTiendaNubeClient:
 
     async def update_product(self, product_id: str, payload):
         self.product_payload = payload
-        return {"id": int(product_id), **payload, "variants": [{"id": 20, "sku": "SKU1"}]}
+        return {
+            "id": int(product_id),
+            **payload,
+            "variants": [{"id": 20, "sku": "SKU1"}],
+        }
 
     async def update_variant(self, *, product_id: str, variant_id: str, payload):
         self.variant_payload = payload
@@ -45,8 +49,8 @@ class FakeUpdateTiendaNubeClient:
 
 
 async def test_adapter_updates_product_and_variant_separately():
-    client = FakeUpdateTiendaNubeClient()
-    adapter = TiendaNubeAdapter(client=client)
+    client = FakeUpdateClienteTiendaNube()
+    adapter = AdaptadorTiendaNube(client=client)
     producto = Producto(
         sku="SKU1",
         id_sistema_gbp="1",

@@ -1,0 +1,16 @@
+{% extends "enterprise/base.html" %}{% block content %}
+<section class="hero"><div><span class="eyebrow">VISIÓN GENERAL</span><h2>Operación centralizada de GBP y Tiendanube</h2><p>Productos, pedidos, sincronizaciones y trazabilidad en un único centro de control.</p></div><div class="hero-actions"><a class="btn primary" href="/admin/panel/importaciones">Nueva importación</a><a class="btn" href="/admin/panel/trabajos">Ver trabajos</a></div></section>
+<div class="metric-grid">
+  <article class="metric"><span>Productos auditados</span><strong>{{ resumen.productos_auditados }}</strong><small>Base evaluada</small></article>
+  <article class="metric"><span>Vinculados a Tiendanube</span><strong>{{ resumen.productos_mapeados_tienda_nube }}</strong><small>Mapeos activos</small></article>
+  <article class="metric"><span>Pendientes de importar</span><strong>{{ resumen.publicables_pendientes_importar }}</strong><small>Listos para procesar</small></article>
+  <article class="metric danger"><span>Bloqueados</span><strong>{{ resumen.bloqueados_total }}</strong><small>Requieren revisión</small></article>
+</div>
+<div class="layout-2">
+<section class="card"><div class="card-head"><div><span class="eyebrow">ACTIVIDAD</span><h3>Trabajos activos</h3></div><a href="/admin/panel/trabajos">Ver todos</a></div>
+{% if jobs_activos %}<div class="job-list">{% for job in jobs_activos %}<a class="job-row" href="/admin/panel/trabajos"><span class="job-icon">↻</span><div><strong>{{ job.tipo or job.nombre or 'Proceso' }}</strong><small>#{{ job.id }} · {{ job.estado }}</small></div><div class="progress"><i style="width:{{ job.progreso_porcentaje or 0 }}%"></i></div><b>{{ job.progreso_porcentaje or 0 }}%</b></a>{% endfor %}</div>{% else %}<div class="empty"><strong>No hay procesos activos</strong><p>La cola está libre para iniciar nuevas operaciones.</p></div>{% endif %}</section>
+<section class="card"><div class="card-head"><div><span class="eyebrow">ESTADO</span><h3>Servicios y automatización</h3></div></div>
+<div class="health-list"><div><span class="status-dot"></span><p><strong>Base de datos</strong><small>Conectada y disponible</small></p><b>OK</b></div><div><span class="status-dot"></span><p><strong>Sincronización de stock</strong><small>Cada {{ settings.stock_sync_interval_minutes }} minutos</small></p><b>{% if settings.stock_scheduler_enabled %}ACTIVA{% else %}PAUSADA{% endif %}</b></div><div><span class="status-dot warning"></span><p><strong>Entorno</strong><small>Controles de escritura</small></p><b>{{ settings.app_env|upper }}</b></div></div></section>
+</div>
+<section class="card"><div class="card-head"><div><span class="eyebrow">DISTRIBUCIÓN</span><h3>Decisiones de publicación</h3></div><a href="/admin/panel/productos?vista=bloqueados">Revisar bloqueados</a></div><div class="decision-grid">{% for nombre, cantidad in decisiones.items() %}<div><span>{{ nombre|replace('_',' ')|title }}</span><strong>{{ cantidad }}</strong></div>{% endfor %}</div></section>
+{% endblock %}

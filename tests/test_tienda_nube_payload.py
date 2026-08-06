@@ -1,9 +1,11 @@
 from decimal import Decimal
 
-from app.domain.models.precio import PrecioProducto
-from app.domain.models.producto import Producto
-from app.domain.models.stock import StockProducto
-from app.infrastructure.tienda_nube.payload_builder import TiendaNubePayloadBuilder
+from app.dominio.modelos.precio import PrecioProducto
+from app.dominio.modelos.producto import Producto
+from app.dominio.modelos.stock import StockProducto
+from app.infraestructura.tienda_nube.construccion_payload import (
+    TiendaNubePayloadBuilder,
+)
 
 
 def test_payload_uses_web_description_price_and_stock():
@@ -45,10 +47,11 @@ def test_payload_uses_vendor_code_as_barcode_and_keeps_long_description():
 def test_payload_accepts_category_ids():
     producto = Producto(sku="SKU1", id_sistema_gbp="1", titulo="Producto")
 
-    payload = TiendaNubePayloadBuilder().build_product_payload(producto, category_ids=[10, 20])
+    payload = TiendaNubePayloadBuilder().build_product_payload(
+        producto, category_ids=[10, 20]
+    )
 
     assert payload["categories"] == [10, 20]
-
 
 
 def test_payload_formats_description_with_paragraphs_bullets_and_separators():
@@ -93,7 +96,10 @@ def test_payload_escapes_description_html_to_avoid_raw_markup():
     payload = TiendaNubePayloadBuilder().build_product_payload(producto)
 
     assert "<script>" not in payload["description"]["es"]
-    assert "&lt;script&gt;alert(1)&lt;/script&gt; &amp; mas" in payload["description"]["es"]
+    assert (
+        "&lt;script&gt;alert(1)&lt;/script&gt; &amp; mas"
+        in payload["description"]["es"]
+    )
 
 
 def test_update_product_payload_does_not_include_variants_or_images():
@@ -106,7 +112,9 @@ def test_update_product_payload_does_not_include_variants_or_images():
         stock=StockProducto(sku="SKU1", id_sistema_gbp="1", cantidad=7),
     )
 
-    payload = TiendaNubePayloadBuilder().build_update_product_payload(producto, category_ids=[1])
+    payload = TiendaNubePayloadBuilder().build_update_product_payload(
+        producto, category_ids=[1]
+    )
 
     assert payload == {
         "name": {"es": "Producto"},

@@ -1,8 +1,8 @@
-from app.domain.models.producto import Producto
-from app.infrastructure.tienda_nube.adapter import TiendaNubeAdapter
+from app.dominio.modelos.producto import Producto
+from app.infraestructura.tienda_nube.adaptador import AdaptadorTiendaNube
 
 
-class FakeTiendaNubeClient:
+class FakeClienteTiendaNube:
     def __init__(self) -> None:
         self.categories = [
             {"id": 1, "name": {"es": "Cocina"}, "parent": None},
@@ -31,8 +31,8 @@ class FakeTiendaNubeClient:
 
 
 async def test_adapter_crea_subcategoria_y_asigna_categorias_al_producto():
-    client = FakeTiendaNubeClient()
-    adapter = TiendaNubeAdapter(client=client)
+    client = FakeClienteTiendaNube()
+    adapter = AdaptadorTiendaNube(client=client)
     producto = Producto(
         sku="SKU1",
         id_sistema_gbp="1",

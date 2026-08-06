@@ -1,5 +1,5 @@
-from app.infrastructure.gbp.normalizer import GBPNormalizer
-from app.infrastructure.gbp.xml_parser import parse_dataset_tables
+from app.infraestructura.gbp.normalizador import GBPNormalizer
+from app.infraestructura.gbp.analizador_xml import parse_dataset_tables
 
 
 def _base_row(**extra):
@@ -63,7 +63,10 @@ def test_parse_dataset_tables_concatenates_duplicate_description_nodes():
 
 def test_normalizer_uses_item_detail_only_when_it_extends_web_description_prefix():
     short = "SOMOS SILMAR BAZAR ONLINE\n\n•Realizamos envíos a todo el pais, podes ver la fecha de entrega estimada"
-    full = short + " presionando donde dice ver más formas de entrega.\n\nDISPENSER JABON LIQUIDO DE CERAMICA\n•Art 6130"
+    full = (
+        short
+        + " presionando donde dice ver más formas de entrega.\n\nDISPENSER JABON LIQUIDO DE CERAMICA\n•Art 6130"
+    )
     data = _base_row(
         WebSite_Description=short,
         item_detail=full,

@@ -1,7 +1,7 @@
 import pytest
 
-from app.domain.errors import DatoIncompletoError
-from app.infrastructure.gbp.normalizer import GBPNormalizer
+from app.dominio.errores import DatoIncompletoError
+from app.infraestructura.gbp.normalizador import GBPNormalizer
 
 
 def test_normalizador_requiere_sku() -> None:

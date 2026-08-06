@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from app.infrastructure.gbp.normalizer import GBPNormalizer
+from app.infraestructura.gbp.normalizador import GBPNormalizer
 
 
 def test_normalizar_precio_detecta_price_list_item_price():
@@ -31,7 +31,11 @@ def test_normalizar_stock_suma_solo_depositos_ecommerce():
     assert stock.consultable is True
     assert stock.cantidad == 3
     assert stock.stock_original_gbp == 3.0
-    usados = [deposito.stor_id for deposito in stock.depositos if deposito.usado_para_tienda_nube]
+    usados = [
+        deposito.stor_id
+        for deposito in stock.depositos
+        if deposito.usado_para_tienda_nube
+    ]
     assert usados == ["1", "16"]
 
 

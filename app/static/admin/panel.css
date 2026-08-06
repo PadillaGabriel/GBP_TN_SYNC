@@ -586,3 +586,8 @@ small,
   .stock-sync-grid { grid-template-columns: 1fr; }
   .stock-sku-form { grid-template-columns: 1fr; }
 }
+
+.exports-card { margin-bottom: 1rem; }
+.exports-grid { margin-top: .75rem; }
+.exports-grid .summary-card small { display: block; margin-top: .35rem; opacity: .72; }
+td small { display: block; margin-top: .25rem; line-height: 1.35; }

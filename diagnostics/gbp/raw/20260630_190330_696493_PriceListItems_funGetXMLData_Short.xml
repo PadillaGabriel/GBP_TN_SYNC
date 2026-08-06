@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><soap:Body><PriceListItems_funGetXMLData_ShortResponse xmlns="http://microsoft.com/webservices/"><PriceListItems_funGetXMLData_ShortResult>&lt;NewDataSet&gt;
-  &lt;Table&gt;
-    &lt;prli_id&gt;1&lt;/prli_id&gt;
-    &lt;item_id&gt;13170&lt;/item_id&gt;
-    &lt;curr_id&gt;1&lt;/curr_id&gt;
-    &lt;prli_price_Final_Pesos&gt;29999.000020000000000000&lt;/prli_price_Final_Pesos&gt;
-  &lt;/Table&gt;
-&lt;/NewDataSet&gt;</PriceListItems_funGetXMLData_ShortResult></PriceListItems_funGetXMLData_ShortResponse></soap:Body></soap:Envelope>

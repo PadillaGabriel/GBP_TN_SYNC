@@ -1,9 +1,16 @@
-from app.infrastructure.gbp.normalizer import GBPNormalizer
-from app.infrastructure.gbp.xml_parser import normalizar_texto_gbp, parse_dataset_tables, reparar_mojibake
+from app.infraestructura.gbp.normalizador import GBPNormalizer
+from app.infraestructura.gbp.analizador_xml import (
+    normalizar_texto_gbp,
+    parse_dataset_tables,
+    reparar_mojibake,
+)
 
 
 def test_reparar_mojibake_corrige_acentos_y_enie() -> None:
-    assert reparar_mojibake("DecoraciÃ³n GenÃ©rica MUÃ‘ECO") == "Decoración Genérica MUÑECO"
+    assert (
+        reparar_mojibake("DecoraciÃ³n GenÃ©rica MUÃ‘ECO")
+        == "Decoración Genérica MUÑECO"
+    )
 
 
 def test_parse_dataset_tables_repara_textos_gbp() -> None:
@@ -47,11 +54,11 @@ def test_normalizador_producto_repara_textos() -> None:
 
 def test_repara_mojibake_con_caracter_c1_antes_de_xml():
     assert normalizar_texto_gbp("MUÃ\x91ECO") == "MUÑECO"
-    assert normalizar_texto_gbp("Sin categorÃ\xad­a") in {"Sin categoría", "Sin categoría"}
+    assert normalizar_texto_gbp("Sin categorÃ\xad­a") == "Sin categoría"
 
 
 def test_clean_xml_repara_mojibake_antes_de_remover_invalidos():
-    from app.infrastructure.gbp.xml_parser import parse_dataset_tables
+    from app.infraestructura.gbp.analizador_xml import parse_dataset_tables
 
     xml = "<NewDataSet><Table><item_desc>MUÃ\x91ECO</item_desc><cat_desc>DecoraciÃ³n</cat_desc></Table></NewDataSet>"
     rows = parse_dataset_tables(xml)
@@ -60,15 +67,15 @@ def test_clean_xml_repara_mojibake_antes_de_remover_invalidos():
 
 
 def test_decode_gbp_response_prefiere_utf8() -> None:
-    from app.infrastructure.gbp.xml_parser import decode_gbp_response
+    from app.infraestructura.gbp.analizador_xml import decode_gbp_response
 
-    content = "Decoración Genérica MUÑECO".encode("utf-8")
+    content = "Decoración Genérica MUÑECO".encode()
 
     assert decode_gbp_response(content) == "Decoración Genérica MUÑECO"
 
 
 def test_normalizar_objeto_gbp_recursivo() -> None:
-    from app.infrastructure.gbp.xml_parser import normalizar_objeto_gbp
+    from app.infraestructura.gbp.analizador_xml import normalizar_objeto_gbp
 
     data = {
         "titulo": "MUÃ‘ECO",

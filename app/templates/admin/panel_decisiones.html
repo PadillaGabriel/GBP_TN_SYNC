@@ -59,6 +59,27 @@
       <article class="summary-card"><span>Bloq. importados</span><strong>{{ dashboard.bloqueados_importados_tienda_nube }}</strong></article>
     </section>
 
+
+    <section class="exports-card control-card">
+      <div class="card-title-row">
+        <div>
+          <h2>Exportaciones GBP activas</h2>
+          <p>Fuente única para ficha, catálogo, precios y stock. La arquitectura anterior queda fuera del flujo productivo.</p>
+        </div>
+        <a class="btn secondary" href="/admin/exportaciones" target="_blank" rel="noopener">Probar las cuatro</a>
+      </div>
+      <div class="summary-grid exports-grid">
+        <article class="summary-card"><span>Ficha individual</span><strong>#{{ dashboard.exportaciones_gbp.producto_individual }}</strong><small>TN_PRODUCTO_POR_ITEM</small></article>
+        <article class="summary-card"><span>Catálogo general</span><strong>#{{ dashboard.exportaciones_gbp.productos_general }}</strong><small>TN_PRODUCTOS_GENERAL</small></article>
+        <article class="summary-card"><span>Precios</span><strong>#{{ dashboard.exportaciones_gbp.precios }}</strong><small>TN_PRODUCTOS_PRECIOS</small></article>
+        <article class="summary-card"><span>Stock</span><strong>#{{ dashboard.exportaciones_gbp.stock }}</strong><small>TN_PRODUCTOS_STOCK</small></article>
+      </div>
+      <form class="sku-import-form" method="get" action="/admin/exportaciones/producto/0" onsubmit="this.action='/admin/exportaciones/producto/'+this.item_id.value">
+        <input name="item_id" type="number" min="1" placeholder="Item ID GBP para vista completa" required>
+        <button class="btn secondary" type="submit">Ver ficha cruda y normalizada</button>
+      </form>
+    </section>
+
     <section class="control-panel" aria-label="Controles del panel">
       <article class="control-card filter-card">
         <div class="card-title-row">
@@ -210,10 +231,11 @@
               <th>Decisión</th>
               <th>Stock TN</th>
               <th>Precio</th>
-              <th>Largo desc.</th>
+              <th>Descripción</th>
+              <th>Clasificación</th>
               <th>Importado</th>
               <th>Estado TN</th>
-              <th>ID TN</th>
+              <th>IDs TN</th>
               <th>Acciones</th>
             </tr>
           </thead>
@@ -232,14 +254,15 @@
                   {% if item.codigo_proveedor %}<small>Cod. proveedor: {{ item.codigo_proveedor }}</small>{% endif %}
                 </td>
                 <td>
-                  <span class="decision-badge {% if decision == 'PUBLICABLE_AUTOMATICO' %}ok{% elif decision == 'SIN_VALIDAR' %}muted{% else %}warn{% endif %}">{{ decision }}</span>
+                  <span class="decision-badge {% if decision in ['PUBLICABLE_AUTOMATICO', 'PUBLICABLE_CONSULTAR_PRECIO'] %}ok{% elif decision == 'SIN_VALIDAR' %}muted{% else %}warn{% endif %}">{{ decision }}</span>
                   {% if item.motivos_bloqueo %}
                     <small class="reason">{{ item.motivos_bloqueo | join(', ') }}</small>
                   {% endif %}
                 </td>
                 <td class="number-cell {% if item.stock_publicable_tn is not none and item.stock_publicable_tn <= 0 %}bad-number{% endif %}">{{ item.stock_publicable_tn if item.stock_publicable_tn is not none else '-' }}</td>
                 <td class="number-cell">{{ item.precio_importado if item.precio_importado is not none else '-' }}</td>
-                <td class="number-cell">{{ item.descripcion_largo }}</td>
+                <td><strong>{{ item.descripcion_largo }}</strong><small>{{ (item.descripcion_web or item.titulo or '')[:160] }}</small></td>
+                <td><small>Marca: {{ item.marca or '-' }}</small><small>Categoría: {{ item.categoria or '-' }}</small><small>Subcategoría: {{ item.subcategoria or '-' }}</small></td>
                 <td>
                   {% if imported %}<span class="status-dot yes">Sí</span>{% else %}<span class="status-dot no">No</span>{% endif %}
                 </td>
@@ -249,7 +272,7 @@
                     <small>no cuenta como importado activo</small>
                   {% endif %}
                 </td>
-                <td>{{ item.tn_product_id or '-' }}</td>
+                <td><small>Producto: {{ item.tn_product_id or '-' }}</small><small>Variante: {{ item.tn_variant_id or '-' }}</small></td>
                 <td>
                   <div class="action-stack">
                     {% if imported %}
@@ -260,7 +283,7 @@
                         <button class="btn danger" type="submit">Eliminar TN</button>
                       </form>
                     {% endif %}
-                    {% if (not imported) or decision != 'PUBLICABLE_AUTOMATICO' %}
+                    {% if (not imported) or decision not in ['PUBLICABLE_AUTOMATICO', 'PUBLICABLE_CONSULTAR_PRECIO'] %}
                       <form method="post" action="/admin/panel/decisiones/{{ item.sku }}/importar-manual?estado={{ estado }}{% if q %}&q={{ q | urlencode }}{% endif %}" data-confirm-title="Importar manualmente" data-confirm-text="Se va a importar o actualizar el SKU {{ item.sku }} forzando la regla de validación." data-confirm-kind="primary">
                         <button class="btn primary" type="submit">Importar forzado</button>
                       </form>
@@ -269,7 +292,7 @@
                 </td>
               </tr>
             {% else %}
-              <tr><td colspan="10" class="empty-state">Sin productos para este filtro.</td></tr>
+              <tr><td colspan="11" class="empty-state">Sin productos para este filtro.</td></tr>
             {% endfor %}
           </tbody>
         </table>

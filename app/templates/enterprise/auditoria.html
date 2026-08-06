@@ -1,0 +1,5 @@
+{% extends "enterprise/base.html" %}{% block content %}
+<section class="hero"><div><span class="eyebrow">TRAZABILIDAD</span><h2>Registro de operaciones del integrador</h2><p>Seguimiento de decisiones, sincronizaciones, errores y acciones manuales.</p></div></section>
+<section class="card"><div class="card-head"><div><span class="eyebrow">ÚLTIMO EVENTO</span><h3>Actividad registrada</h3></div></div>{% if ultimo_evento %}<div class="detail-grid">{% for clave, valor in ultimo_evento.items() %}<div><span>{{ clave|replace('_',' ')|title }}</span><strong>{{ valor }}</strong></div>{% endfor %}</div>{% else %}<div class="empty"><strong>No hay eventos de auditoría</strong></div>{% endif %}</section>
+<section class="card"><div class="callout"><strong>Auditoría técnica disponible por API</strong><p>La interfaz utiliza los repositorios de trazabilidad existentes. Los detalles de diagnóstico permanecen disponibles en los endpoints administrativos y en los logs estructurados.</p></div><a class="btn" href="/docs">Abrir documentación API</a></section>
+{% endblock %}

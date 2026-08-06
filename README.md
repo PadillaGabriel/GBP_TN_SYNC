@@ -1,99 +1,37 @@
-# Integrador GBP -> Tienda Nube
+# Integrador GBP ↔ Tiendanube
 
-Integrador nuevo para tomar GBP como fuente canónica y publicar/sincronizar productos en Tienda Nube.
+Microservicio único para Silmar Bazar que integra GBP y Tiendanube.
 
-## Decisiones principales
+## Subsistemas
 
-```text
-GBP es fuente canónica.
-Tienda Nube es destino.
-Mercado Libre no forma parte del núcleo.
-Precio solo se usa en importación inicial o actualización completa manual.
-Stock se sincroniza de forma frecuente.
+1. Sincronización de stock GBP → Tiendanube.
+2. Importación, auditoría y gestión de productos.
+3. Panel administrativo de decisiones y trabajos masivos.
+4. Clientes y pedidos Tiendanube → GBP mediante Web Services nativos.
+
+## Seguridad operativa de pedidos
+
+La escritura temporal y la confirmación final se controlan de manera independiente:
+
+```env
+DRY_RUN=false
+PEDIDOS_ESCRITURA_GBP_HABILITADA=true
+PEDIDOS_GBP_STAGING_ENABLED=true
+PEDIDOS_GBP_CONFIRMATION_ENABLED=false
+PEDIDOS_GBP_TOTAL_TOLERANCE=0.01
+PEDIDOS_GBP_RESIDUAL_MAXIMO_AJUSTABLE=0.05
 ```
 
-## Criterio de producto publicable
+Mantener `PEDIDOS_GBP_CONFIRMATION_ENABLED=false` hasta realizar la prueba final controlada.
 
-Un producto solo entra a importación automática si cumple:
+## Ejecución local
 
-```text
-Tiene imagen Website en ItemBasicData_funGetXMLData
-item_web == true en wsItem_funGetXMLDataById
-item_disabled != true
-item_not4Sale != true
-WebSite_Description no vacía
-precio online válido
-stock disponible consultable
-SKU válido
-título válido
+```powershell
+python -m pytest -q
+python -m compileall app tests
+python -m uvicorn app.principal:app --host 127.0.0.1 --port 8000
 ```
 
-## Stock
+Panel: `http://127.0.0.1:8000/admin`
 
-El stock para Tienda Nube es stock disponible, no stock general.
-
-```text
-Campo GBP usado: Stock
-No usar: FS / stock físico bruto
-```
-
-Cálculo:
-
-```text
-stock_tn = max(0, suma de Stock en depósitos habilitados)
-```
-
-## Panel admin
-
-Endpoints iniciales:
-
-```text
-GET  /health
-GET  /admin/dashboard
-GET  /admin/productos
-GET  /admin/productos/bloqueados
-GET  /admin/depositos
-POST /sync/stock/run
-POST /sync/audit/productos/run
-```
-
-## Deploy
-
-Ver:
-
-```text
-docs/DEPLOY_RENDER_RAILWAY.md
-```
-
-## Variables
-
-Copiar:
-
-```bash
-cp .env.example .env
-```
-
-En Render, configurar las variables desde el dashboard.
-
-## Ejecutar local
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
-
-## Tests
-
-```bash
-pytest
-```
-
-## Diagnóstico GBP
-
-```bash
-python scripts/diagnosticar_gbp_metodos.py
-python scripts/auditar_item_web.py --source basic
-python scripts/auditar_item_web.py --source detail --only-with-basic-image --concurrency 5
-```
+Swagger: `http://127.0.0.1:8000/docs`

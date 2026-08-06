@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ titulo }} · Integrador</title>
+  <link rel="stylesheet" href="/static/enterprise/app.css">
+  <script type="module" src="/static/enterprise/app.js"></script>
+</head>
+<body data-section="{{ seccion }}">
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="/admin/panel"><span class="brand-mark">SI</span><span><strong>Silmar Integrador</strong><small>Control Center</small></span></a>
+    <nav class="nav">
+      <p class="nav-label">OPERACIÓN</p>
+      <a href="/admin/panel" data-nav="inicio"><span>⌂</span>Inicio</a>
+      <a href="/admin/panel/productos" data-nav="productos"><span>▦</span>Productos</a>
+      <a href="/admin/panel/importaciones" data-nav="importaciones"><span>⇩</span>Importaciones</a>
+      <a href="/admin/panel/sincronizacion" data-nav="sincronizacion"><span>↻</span>Sincronización</a>
+      <a href="/admin/panel/pedidos" data-nav="pedidos"><span>▤</span>Pedidos</a>
+      <p class="nav-label">PLATAFORMA</p>
+      <a href="/admin/panel/exportaciones" data-nav="exportaciones"><span>⇄</span>Exportaciones GBP</a>
+      <a href="/admin/panel/trabajos" data-nav="trabajos"><span>◷</span>Trabajos</a>
+      <a href="/admin/panel/auditoria" data-nav="auditoria"><span>◎</span>Auditoría</a>
+      <a href="/admin/panel/configuracion" data-nav="configuracion"><span>⚙</span>Configuración</a>
+    </nav>
+    <div class="sidebar-footer"><span class="status-dot"></span><div><strong>{{ entorno|upper }}</strong><small>{% if dry_run %}Modo simulación{% else %}Escritura habilitada{% endif %}</small></div></div>
+  </aside>
+  <section class="workspace">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="menuBtn" aria-label="Abrir menú">☰</button>
+      <div><span class="eyebrow">INTEGRADOR EMPRESARIAL</span><h1>{{ titulo }}</h1></div>
+      <div class="top-actions"><span class="env-pill {% if dry_run %}warning{% else %}success{% endif %}">{% if dry_run %}DRY RUN{% else %}OPERATIVO{% endif %}</span><a class="icon-btn" href="/docs" title="API">API</a></div>
+    </header>
+    <main class="content">{% block content %}{% endblock %}</main>
+  </section>
+</div>
+<div class="toast-stack" id="toastStack"></div>
+</body>
+</html>

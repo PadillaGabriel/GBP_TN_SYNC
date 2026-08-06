@@ -1,0 +1,86 @@
+{% extends "enterprise/base.html" %}
+
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <span class="eyebrow">CONTRATOS GBP</span>
+      <h3>Exportaciones personalizadas activas</h3>
+      <p class="lead">
+        Verificá disponibilidad, filas y duración de los contratos consumidos
+        por el Integrador. La exportación individual ID 11 es interactiva y no
+        se ejecuta mediante wsExportDataById.
+      </p>
+    </div>
+    <button class="btn primary" id="testExports" type="button">
+      Probar compatibles
+    </button>
+  </div>
+
+  <div class="export-grid">
+    {% for exportacion in exportaciones %}
+      <article
+        class="export-card"
+        data-export="{{ exportacion.id }}"
+        data-compatible-ws="{{ 'true' if exportacion.compatible_ws else 'false' }}"
+      >
+        <div class="export-card-header">
+          <span class="badge neutral">ID {{ exportacion.id }}</span>
+          <span class="export-status" aria-live="polite">
+            {% if exportacion.compatible_ws %}No probado{% else %}Uso manual GBP{% endif %}
+          </span>
+        </div>
+        <h4>{{ exportacion.nombre }}</h4>
+        <p>{{ exportacion.uso }}</p>
+        <dl>
+          <div>
+            <dt>Filas</dt>
+            <dd data-field="rows">—</dd>
+          </div>
+          <div>
+            <dt>Duración</dt>
+            <dd data-field="time">—</dd>
+          </div>
+        </dl>
+        <div class="export-error" data-field="error" hidden></div>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      <span class="eyebrow">FICHA INDIVIDUAL</span>
+      <h3>Inspeccionar artículo exportado</h3>
+      <p class="lead">
+        Buscá por el item_code utilizado como SKU en GBP y Tiendanube.
+      </p>
+    </div>
+  </div>
+
+  <form class="form-inline" id="exportProductForm" autocomplete="off">
+    <label for="exportItemCode">
+      SKU / Código de artículo
+      <input
+        id="exportItemCode"
+        name="item_code"
+        type="text"
+        required
+        minlength="1"
+        maxlength="100"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="Ejemplo: 8082"
+      >
+    </label>
+    <button class="btn" type="submit">Consultar ficha</button>
+  </form>
+
+  <pre
+    class="result-console"
+    id="exportProductResult"
+    aria-live="polite"
+  >Sin consulta.</pre>
+</section>
+{% endblock %}

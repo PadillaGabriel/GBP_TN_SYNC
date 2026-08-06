@@ -1,4 +1,4 @@
-from app.infrastructure.gbp.xml_parser import parse_dataset_tables
+from app.infraestructura.gbp.analizador_xml import parse_dataset_tables
 
 
 def test_parse_dataset_tables_preserves_description_after_html_tags():
