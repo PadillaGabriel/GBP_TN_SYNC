@@ -1,6 +1,6 @@
 {% extends "enterprise/base.html" %}{% block content %}
 <div class="callout warning"><strong>Vista segura</strong><p>Las credenciales nunca se muestran. Solo se informa si están configuradas.</p></div><section class="card"><div class="card-head"><div><span class="eyebrow">PARÁMETROS ACTIVOS</span><h3>Configuración operativa</h3></div></div><div class="settings-list">{% for nombre, valor in campos.items() %}<div><span>{{ nombre }}</span><strong>{% if valor is sameas true %}Configurado / Activo{% elif valor is sameas false %}No configurado / Inactivo{% else %}{{ valor }}{% endif %}</strong></div>{% endfor %}</div></section>
-<section class="card"><div class="card-head"><div><span class="eyebrow">CALIDAD</span><h3>Puerta de validación</h3></div></div><pre class="result-console">.\scriptsuditar_calidad.ps1
+<section class="card"><div class="card-head"><div><span class="eyebrow">CALIDAD</span><h3>Puerta de validación</h3></div></div><pre class="result-console">.\scripts\auditar_calidad.ps1
 
 Ruff lint · Ruff format · Compilación · Pytest</pre></section>
 {% endblock %}

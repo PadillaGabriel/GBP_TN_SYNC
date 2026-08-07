@@ -1,9 +1,6 @@
 import logging
-from urllib.parse import urlencode
-
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.aplicacion.trabajos.trabajos_masivos import (
@@ -15,7 +12,6 @@ from app.aplicacion.trabajos.trabajos_masivos import (
     ejecutar_job_normalizar_categorias,
     ejecutar_job_reauditar_decision,
     ejecutar_job_reconciliar_tienda_nube,
-    ejecutar_job_reset_mapeos_locales,
     ejecutar_job_stock_lote,
     ejecutar_job_stock_sku,
 )
@@ -38,39 +34,7 @@ from app.infraestructura.gbp.cliente import ClienteGBP
 from app.infraestructura.gbp.exportaciones import ProveedorExportacionesGBP
 
 router = APIRouter(prefix="/admin", tags=["admin"])
-templates = Jinja2Templates(directory="app/templates")
 logger = logging.getLogger(__name__)
-
-
-def _panel_redirect(
-    estado: str = "requiere_revision",
-    mensaje: str | None = None,
-    *,
-    q: str | None = None,
-    limit: int | None = None,
-    offset: int | None = None,
-) -> RedirectResponse:
-    """Redirige al panel visual preservando filtros seguros.
-
-    Centraliza las acciones POST del panel para evitar duplicar armado de URLs
-    y para que un error en operaciones de mantenimiento no termine en 500 por
-    falta de redirección.
-    """
-
-    params: dict[str, str | int] = {"estado": estado or "requiere_revision"}
-    if limit is not None:
-        params["limit"] = limit
-    if offset is not None:
-        params["offset"] = offset
-    if q:
-        params["q"] = q
-    if mensaje:
-        params["mensaje"] = mensaje
-
-    return RedirectResponse(
-        url=f"/admin/panel/decisiones?{urlencode(params)}",
-        status_code=303,
-    )
 
 
 @router.get("/dashboard")
@@ -428,99 +392,6 @@ def listar_depositos(db: Session = Depends(obtener_sesion_bd)) -> dict[str, obje
     return {"items": depositos.listar()}
 
 
-@router.get("/panel-legacy", response_class=HTMLResponse)
-def panel_home() -> RedirectResponse:
-    """Entrada visual del panel administrativo."""
-
-    return RedirectResponse(
-        url="/admin/panel",
-        status_code=303,
-    )
-
-
-@router.get("/panel-legacy/decisiones", response_class=HTMLResponse)
-def panel_decisiones(
-    request: Request,
-    estado: str = Query(default="requiere_revision"),
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-    q: str | None = Query(default=None),
-    mensaje: str | None = Query(default=None),
-    db: Session = Depends(obtener_sesion_bd),
-) -> HTMLResponse:
-    """Panel HTML para revisar y ejecutar decisiones operativas."""
-
-    productos = RepositorioProductos(db)
-    auditoria = RepositorioAuditoriaSincronizacion(db)
-    jobs = RepositorioTrabajosSincronizacion(db)
-    settings = obtener_configuracion()
-    resumen = productos.resumen_operativo_panel()
-    dashboard_data = {
-        "app_env": settings.app_env,
-        "dry_run": settings.dry_run,
-        "stock_scheduler_enabled": settings.stock_scheduler_enabled,
-        "stock_sync_interval_minutes": settings.stock_sync_interval_minutes,
-        "productos_auditados": resumen["productos_auditados"],
-        "productos_mapeados_tienda_nube": resumen["productos_mapeados_tienda_nube"],
-        "productos_mapeados_locales": resumen.get("productos_mapeados_locales"),
-        "productos_mapeados_eliminados": resumen.get("productos_mapeados_eliminados"),
-        "productos_importados": resumen["productos_mapeados_tienda_nube"],
-        "publicables_total": resumen["publicables_total"],
-        "publicables_pendientes_importar": resumen["publicables_pendientes_importar"],
-        "bloqueados_total": resumen["bloqueados_total"],
-        "bloqueados_importados_tienda_nube": resumen[
-            "bloqueados_importados_tienda_nube"
-        ],
-        "bloqueados_por_motivo": resumen["bloqueados_por_motivo"],
-        "decisiones": productos.contar_por_decision(),
-        "stock_sync": productos.resumen_stock_sync(),
-        "jobs": jobs.contar_por_estado(),
-        "jobs_recientes": jobs.listar_recientes(limit=10),
-        "jobs_activos": jobs.listar_activos(limit=10),
-        "ultimo_evento": auditoria.obtener_ultimo_evento(),
-        "exportaciones_gbp": {
-            "producto_individual": settings.gbp_export_producto_por_item_id,
-            "productos_general": settings.gbp_export_productos_general_id,
-            "precios": settings.gbp_export_productos_precios_id,
-            "stock": settings.gbp_export_productos_stock_id,
-        },
-    }
-    estados = [
-        ("requiere_revision", "Requiere revisión"),
-        ("bloqueado_importado", "Bloqueados importados"),
-        ("publicable_pendiente", "Publicables pendientes"),
-        ("importado", "Importados"),
-        ("bloqueado", "Bloqueados"),
-        ("todos", "Todos"),
-        ("NO_PUBLICAR_STOCK_SIN_DISPONIBLE", "Sin stock disponible"),
-        ("NO_PUBLICAR_SIN_DESCRIPCION_WEB", "Sin descripción web"),
-        ("PUBLICABLE_AUTOMATICO", "Precio automático"),
-        ("PUBLICABLE_CONSULTAR_PRECIO", "Consultar precio"),
-    ]
-    items = productos.listar_panel_decisiones(
-        estado=estado, limit=limit, offset=offset, q=q
-    )
-    prev_offset = max(offset - limit, 0)
-    next_offset = offset + limit
-    return templates.TemplateResponse(
-        "admin/panel_decisiones.html",
-        {
-            "request": request,
-            "dashboard": dashboard_data,
-            "items": items,
-            "estados": estados,
-            "estado": estado,
-            "limit": limit,
-            "offset": offset,
-            "prev_offset": prev_offset,
-            "next_offset": next_offset,
-            "q": q or "",
-            "mensaje": mensaje,
-            "settings": settings,
-        },
-    )
-
-
 @router.post("/panel/jobs/auditar-todo")
 async def panel_iniciar_job_auditar_todo(
     background_tasks: BackgroundTasks,
@@ -784,18 +655,18 @@ async def panel_stock_run_sku(
     )
 
 
-@router.post("/panel/decisiones/reconciliar-tn")
+@router.post("/panel/mapeos/reconciliar-tn")
 async def panel_reconciliar_mapeos_tienda_nube(
     background_tasks: BackgroundTasks,
     limit: int = Query(default=500, ge=1, le=1000),
     db: Session = Depends(obtener_sesion_bd),
 ) -> JSONResponse:
-    """Verifica mapeos contra Tienda Nube como job visible."""
+    """Verifica mapeos activos contra Tienda Nube como job visible."""
 
     job = RepositorioTrabajosSincronizacion(db).crear(
         tipo="RECONCILIAR_TN",
         progreso={
-            "mensaje": "Job creado para reconciliar Tienda Nube.",
+            "mensaje": "Job creado para reconciliar vínculos Tienda Nube.",
             "limit": limit,
             "porcentaje": 0,
         },
@@ -803,31 +674,6 @@ async def panel_reconciliar_mapeos_tienda_nube(
     background_tasks.add_task(
         ejecutar_job_reconciliar_tienda_nube, job_id=job.id, limit=limit
     )
-    return JSONResponse(
-        {
-            "ok": True,
-            "job_id": job.id,
-            "tipo": job.tipo,
-            "status_url": f"/admin/panel/jobs/{job.id}",
-        }
-    )
-
-
-@router.post("/panel/decisiones/mapeos/marcar-eliminados-externos")
-def panel_marcar_mapeos_eliminados_externos(
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(obtener_sesion_bd),
-) -> JSONResponse:
-    """Marca mapeos como eliminados externamente como job visible."""
-
-    job = RepositorioTrabajosSincronizacion(db).crear(
-        tipo="RESET_MAPEOS_LOCALES",
-        progreso={
-            "mensaje": "Job creado para resetear mapeos locales.",
-            "porcentaje": 0,
-        },
-    )
-    background_tasks.add_task(ejecutar_job_reset_mapeos_locales, job_id=job.id)
     return JSONResponse(
         {
             "ok": True,
@@ -928,55 +774,3 @@ async def panel_auditar_bloqueados_sin_descripcion(
             "status_url": f"/admin/panel/jobs/{job.id}",
         }
     )
-
-
-@router.post("/panel/decisiones/{sku}/ocultar-tn")
-async def panel_ocultar_producto_tienda_nube(
-    sku: str,
-    estado: str = Query(default="requiere_revision"),
-    q: str | None = Query(default=None),
-    db: Session = Depends(obtener_sesion_bd),
-) -> RedirectResponse:
-    """Acción visual: oculta/despublica en Tienda Nube con confirmación implícita del formulario."""
-
-    settings = obtener_configuracion()
-    service = TiendaNubeImportService(settings=settings, db=db)
-    resultado = await service.ocultar_producto_tienda_nube(sku=sku, confirm=True)
-    mensaje = f"SKU {sku}: {resultado.get('estado')} - {resultado.get('accion', 'ocultar_tienda_nube')}"
-    return _panel_redirect(estado, mensaje, q)
-
-
-@router.post("/panel/decisiones/{sku}/eliminar-tn")
-async def panel_eliminar_producto_tienda_nube(
-    sku: str,
-    estado: str = Query(default="requiere_revision"),
-    q: str | None = Query(default=None),
-    db: Session = Depends(obtener_sesion_bd),
-) -> RedirectResponse:
-    """Acción visual: elimina en Tienda Nube con confirmación implícita del formulario."""
-
-    settings = obtener_configuracion()
-    service = TiendaNubeImportService(settings=settings, db=db)
-    resultado = await service.eliminar_producto_tienda_nube(sku=sku, confirm=True)
-    mensaje = f"SKU {sku}: {resultado.get('estado')} - {resultado.get('accion', 'eliminar_tienda_nube')}"
-    return _panel_redirect(estado, mensaje, q)
-
-
-@router.post("/panel/decisiones/{sku}/importar-manual")
-async def panel_importar_producto_manual(
-    sku: str,
-    estado: str = Query(default="requiere_revision"),
-    q: str | None = Query(default=None),
-    db: Session = Depends(obtener_sesion_bd),
-) -> RedirectResponse:
-    """Acción visual: importa o actualiza manualmente un producto, forzando si está bloqueado."""
-
-    settings = obtener_configuracion()
-    service = TiendaNubeImportService(settings=settings, db=db)
-    resultado = await service.importar_producto_manual_tienda_nube(
-        sku=sku,
-        confirm=True,
-        forzar=True,
-    )
-    mensaje = f"SKU {sku}: {resultado.get('estado')} - {resultado.get('accion', 'importar_manual_forzada')}"
-    return _panel_redirect(estado, mensaje, q)

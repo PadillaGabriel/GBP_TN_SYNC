@@ -19,6 +19,7 @@ from app.infraestructura.persistencia.repositorios import (
 )
 from app.infraestructura.tienda_nube.cliente import ClienteTiendaNube
 from app.configuracion import ConfiguracionAplicacion
+from app.dominio.errores import TiendaNubeHTTPError
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,8 @@ class StockSyncService:
                 f"seleccionados={resumen['seleccionados']} procesados={resumen['procesados']} "
                 f"actualizados={resumen['actualizados']} sin_cambios={resumen['sin_cambios']} "
                 f"simulados={resumen['simulados']} no_consultables={resumen['stock_no_consultable']} "
+                f"mapeos_reparados={resumen['mapeos_reparados']} "
+                f"mapeos_obsoletos={resumen['mapeos_obsoletos']} "
                 f"errores={resumen['errores']} dry_run={self.settings.dry_run}"
             ),
             metodo_gbp="wsExportDataById(14)",
@@ -122,7 +125,11 @@ class StockSyncService:
             usar_cache=False,
         )
         result = await self._sincronizar_item(item, fila_stock=row)
-        result["ok"] = result.get("estado") not in {"ERROR", "STOCK_NO_CONSULTABLE"}
+        result["ok"] = result.get("estado") not in {
+            "ERROR",
+            "STOCK_NO_CONSULTABLE",
+            "MAPEO_TN_OBSOLETO",
+        }
         result["duration_ms"] = int((time.perf_counter() - started) * 1000)
         return normalizar_objeto_gbp(result)
 
@@ -207,13 +214,39 @@ class StockSyncService:
                 estado = "SIMULADO"
                 detalle_tn: dict[str, Any] = {"dry_run": True}
             else:
-                detalle_tn = await self.tn.update_variant_stock(
-                    product_id=tn_product_id,
-                    variant_id=tn_variant_id,
-                    stock=stock_nuevo,
-                )
-                self.productos.marcar_stock_sync_tienda_nube(sku)
-                estado = "ACTUALIZADO"
+                try:
+                    detalle_tn = await self.tn.update_variant_stock(
+                        product_id=tn_product_id,
+                        variant_id=tn_variant_id,
+                        stock=stock_nuevo,
+                    )
+                    self.productos.marcar_stock_sync_tienda_nube(sku)
+                    estado = "ACTUALIZADO"
+                except TiendaNubeHTTPError as exc:
+                    if exc.status_code != 404:
+                        raise
+                    reparacion = await self._reparar_vinculacion_tienda_nube(
+                        sku=sku,
+                        tn_product_id_anterior=tn_product_id,
+                        tn_variant_id_anterior=tn_variant_id,
+                    )
+                    if reparacion is None:
+                        return {
+                            "sku": sku,
+                            "estado": "MAPEO_TN_OBSOLETO",
+                            "stock_anterior": stock_anterior,
+                            "stock_nuevo": stock_nuevo,
+                            "tn_product_id": tn_product_id,
+                            "tn_variant_id": tn_variant_id or None,
+                        }
+                    tn_product_id, tn_variant_id = reparacion
+                    detalle_tn = await self.tn.update_variant_stock(
+                        product_id=tn_product_id,
+                        variant_id=tn_variant_id,
+                        stock=stock_nuevo,
+                    )
+                    self.productos.marcar_stock_sync_tienda_nube(sku)
+                    estado = "ACTUALIZADO_MAPEO_REPARADO"
 
             self.auditoria.registrar(
                 sku=sku,
@@ -256,6 +289,79 @@ class StockSyncService:
                 "tn_variant_id": tn_variant_id or None,
             }
 
+    async def _reparar_vinculacion_tienda_nube(
+        self,
+        *,
+        sku: str,
+        tn_product_id_anterior: str,
+        tn_variant_id_anterior: str,
+    ) -> tuple[str, str] | None:
+        """Autorrepara un mapeo 404 buscando el SKU vigente en Tienda Nube.
+
+        Si el SKU ya no existe, el mapeo se marca como obsoleto para que deje de
+        entrar en los lotes automáticos. Nunca crea productos desde stock.
+        """
+
+        product = await self.tn.get_product_by_sku(sku)
+        if not isinstance(product, dict) or not product.get("id"):
+            self.productos.marcar_mapeo_tienda_nube_obsoleto(sku)
+            self.auditoria.registrar(
+                sku=sku,
+                accion="STOCK_SYNC_RECONCILIAR_TN",
+                estado="MAPEO_TN_OBSOLETO",
+                mensaje=(
+                    f"product_id_anterior={tn_product_id_anterior} "
+                    f"variant_id_anterior={tn_variant_id_anterior}; "
+                    "el SKU ya no existe en Tienda Nube"
+                ),
+                metodo_gbp="TiendaNube.get_product_by_sku",
+            )
+            return None
+
+        variants = product.get("variants") or []
+        variant = next(
+            (
+                row
+                for row in variants
+                if str(row.get("sku") or "").strip().casefold() == sku.casefold()
+            ),
+            None,
+        )
+        if variant is None and len(variants) == 1:
+            variant = variants[0]
+        if not isinstance(variant, dict) or not variant.get("id"):
+            self.productos.marcar_mapeo_tienda_nube_obsoleto(sku)
+            self.auditoria.registrar(
+                sku=sku,
+                accion="STOCK_SYNC_RECONCILIAR_TN",
+                estado="MAPEO_TN_OBSOLETO",
+                mensaje=(
+                    f"product_id_nuevo={product.get('id')} sin variante inequívoca "
+                    f"para SKU={sku}"
+                ),
+                metodo_gbp="TiendaNube.get_product_by_sku",
+            )
+            return None
+
+        nuevo_product_id = str(product["id"])
+        nuevo_variant_id = str(variant["id"])
+        self.productos.reparar_mapeo_tienda_nube(
+            sku=sku,
+            tn_product_id=nuevo_product_id,
+            tn_variant_id=nuevo_variant_id,
+        )
+        self.auditoria.registrar(
+            sku=sku,
+            accion="STOCK_SYNC_RECONCILIAR_TN",
+            estado="MAPEO_TN_REPARADO",
+            mensaje=(
+                f"product_id={tn_product_id_anterior}->{nuevo_product_id} "
+                f"variant_id={tn_variant_id_anterior}->{nuevo_variant_id}"
+            ),
+            metodo_gbp="TiendaNube.get_product_by_sku",
+        )
+        return nuevo_product_id, nuevo_variant_id
+
     def _empty_summary(self, *, limit: int) -> dict[str, Any]:
         return {
             "ok": False,
@@ -267,6 +373,8 @@ class StockSyncService:
             "simulados": 0,
             "sin_cambios": 0,
             "stock_no_consultable": 0,
+            "mapeos_reparados": 0,
+            "mapeos_obsoletos": 0,
             "errores": 0,
             "duration_ms": 0,
             "resultados_muestra": [],
@@ -278,11 +386,16 @@ class StockSyncService:
         estado = str(result.get("estado") or "")
         if estado == "ACTUALIZADO":
             resumen["actualizados"] += 1
+        elif estado == "ACTUALIZADO_MAPEO_REPARADO":
+            resumen["actualizados"] += 1
+            resumen["mapeos_reparados"] += 1
         elif estado == "SIMULADO":
             resumen["simulados"] += 1
         elif estado == "SIN_CAMBIOS":
             resumen["sin_cambios"] += 1
         elif estado == "STOCK_NO_CONSULTABLE":
             resumen["stock_no_consultable"] += 1
+        elif estado == "MAPEO_TN_OBSOLETO":
+            resumen["mapeos_obsoletos"] += 1
         elif estado == "ERROR":
             resumen["errores"] += 1

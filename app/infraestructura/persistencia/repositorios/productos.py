@@ -18,7 +18,7 @@ from app.infraestructura.persistencia.modelos import (
 )
 
 
-MAPEO_TN_ESTADOS_INACTIVOS = ("eliminado_tn", "eliminado_externo")
+MAPEO_TN_ESTADOS_INACTIVOS = ("eliminado_tn", "eliminado_externo", "vinculacion_obsoleta")
 
 
 class RepositorioProductos:
@@ -363,13 +363,29 @@ class RepositorioProductos:
     def listar_panel_productos(
         self, limit: int = 100, offset: int = 0
     ) -> list[dict[str, object]]:
-        """Lista productos con datos relevantes para el panel."""
+        """Lista productos con estado GBP, stock y vínculo Tienda Nube para el panel."""
 
         rows = self.db.execute(
-            select(ProductoFuenteModel, ProductoValidacionModel)
+            select(
+                ProductoFuenteModel,
+                ProductoValidacionModel,
+                ProductoTiendaNubeModel,
+                StockActualModel.stock_publicable_tn,
+            )
             .join(
                 ProductoValidacionModel,
                 ProductoValidacionModel.producto_fuente_id == ProductoFuenteModel.id,
+                isouter=True,
+            )
+            .join(
+                ProductoTiendaNubeModel,
+                ProductoTiendaNubeModel.sku == ProductoFuenteModel.sku,
+                isouter=True,
+            )
+            .join(
+                StockActualModel,
+                (StockActualModel.producto_fuente_id == ProductoFuenteModel.id)
+                & (StockActualModel.usado_para_tienda_nube.is_(True)),
                 isouter=True,
             )
             .order_by(ProductoFuenteModel.updated_at.desc())
@@ -377,7 +393,8 @@ class RepositorioProductos:
             .limit(limit)
         ).all()
         return [
-            self._to_panel_dict(producto, validacion) for producto, validacion in rows
+            self._to_producto_panel_dict(producto, validacion, mapeo, stock_publicable)
+            for producto, validacion, mapeo, stock_publicable in rows
         ]
 
     def listar_productos_importados(
@@ -397,6 +414,11 @@ class RepositorioProductos:
                 ProductoValidacionModel,
                 ProductoValidacionModel.producto_fuente_id == ProductoFuenteModel.id,
                 isouter=True,
+            )
+            .where(
+                ProductoTiendaNubeModel.estado_publicacion.notin_(
+                    MAPEO_TN_ESTADOS_INACTIVOS
+                )
             )
             .order_by(ProductoTiendaNubeModel.updated_at.desc())
             .offset(offset)
@@ -600,6 +622,31 @@ class RepositorioProductos:
         model.tn_variant_id = tn_variant_id
         self.db.commit()
 
+    def reparar_mapeo_tienda_nube(
+        self,
+        *,
+        sku: str,
+        tn_product_id: str,
+        tn_variant_id: str | None,
+    ) -> ProductoTiendaNubeModel | None:
+        """Corrige un vínculo local obsoleto sin perder su historial."""
+
+        model = self.obtener_mapeo_tienda_nube_por_sku(sku)
+        if model is None:
+            return None
+        model.tn_product_id = str(tn_product_id)
+        model.tn_variant_id = str(tn_variant_id) if tn_variant_id else None
+        model.estado_publicacion = "activo"
+        model.ultima_sync_completa = datetime.now(UTC)
+        self.db.commit()
+        self.db.refresh(model)
+        return model
+
+    def marcar_mapeo_tienda_nube_obsoleto(self, sku: str) -> None:
+        """Retira de rotación de stock un vínculo que ya no existe en Tienda Nube."""
+
+        self.actualizar_estado_mapeo_tienda_nube(sku, "vinculacion_obsoleta")
+
     def marcar_stock_sync_tienda_nube(self, sku: str) -> None:
         """Marca última sincronización de stock en mapeo y stock actual."""
 
@@ -800,7 +847,7 @@ class RepositorioProductos:
             "marca": producto.marca_nombre,
             "codigo_proveedor": producto.codigo_proveedor,
             "precio_importado": float(producto.precio_importado)
-            if producto.precio_importado
+            if producto.precio_importado is not None
             else None,
             "stock_publicable_tn": stock_publicable,
             "decision": decision,
@@ -847,7 +894,7 @@ class RepositorioProductos:
             "marca": producto.marca_nombre,
             "codigo_proveedor": producto.codigo_proveedor,
             "precio_importado": float(producto.precio_importado)
-            if producto.precio_importado
+            if producto.precio_importado is not None
             else None,
             "stock_publicable_tn": self._stock_publicable_tn(producto.id),
             "decision": validacion.decision if validacion else "SIN_VALIDAR",
@@ -884,6 +931,26 @@ class RepositorioProductos:
         )
         return data
 
+    def _to_producto_panel_dict(
+        self,
+        producto: ProductoFuenteModel,
+        validacion: ProductoValidacionModel | None,
+        mapeo: ProductoTiendaNubeModel | None,
+        stock_publicable: int | None,
+    ) -> dict[str, object]:
+        data = self._to_panel_dict(producto, validacion)
+        data.update(
+            {
+                "stock_publicable_tn": stock_publicable,
+                "tn_product_id": mapeo.tn_product_id if mapeo else None,
+                "tn_variant_id": mapeo.tn_variant_id if mapeo else None,
+                "estado_publicacion": mapeo.estado_publicacion if mapeo else None,
+                "ya_importado_tienda_nube": self.es_mapeo_tienda_nube_activo(mapeo),
+                "tuvo_mapeo_tienda_nube": mapeo is not None,
+            }
+        )
+        return data
+
     @staticmethod
     def _to_panel_dict(
         producto: ProductoFuenteModel,
@@ -897,12 +964,13 @@ class RepositorioProductos:
             "subcategoria": producto.subcategoria_nombre,
             "marca": producto.marca_nombre,
             "codigo_proveedor": producto.codigo_proveedor,
+            "codigo_universal": producto.codigo_universal,
             "item_web": producto.publicable_web,
             "item_disabled": producto.item_disabled,
             "item_not_for_sale": producto.item_not_for_sale,
             "tiene_descripcion_web": bool((producto.descripcion_web or "").strip()),
             "precio_importado": float(producto.precio_importado)
-            if producto.precio_importado
+            if producto.precio_importado is not None
             else None,
             "decision": validacion.decision if validacion else "SIN_VALIDAR",
             "motivos_bloqueo": validacion.motivos_bloqueo.split(",")
@@ -912,3 +980,4 @@ class RepositorioProductos:
             if producto.ultima_validacion
             else None,
         }
+

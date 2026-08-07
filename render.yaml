@@ -11,9 +11,13 @@ services:
       - key: APP_DEBUG
         value: false
       - key: DRY_RUN
-        value: true
-      - key: STOCK_SCHEDULER_ENABLED
         value: false
+      - key: STOCK_SCHEDULER_ENABLED
+        value: true
+      - key: STOCK_SYNC_INTERVAL_MINUTES
+        value: 10
+      - key: STOCK_SYNC_BATCH_SIZE
+        value: 50
       - key: IMPORT_SCHEDULER_ENABLED
         value: false
       - key: LOG_LEVEL

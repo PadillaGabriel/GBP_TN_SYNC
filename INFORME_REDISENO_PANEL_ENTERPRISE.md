@@ -25,7 +25,7 @@ Se reemplazó la pantalla administrativa monolítica por una interfaz modular de
 
 ## Compatibilidad
 
-El panel anterior se conserva temporalmente bajo `/admin/panel-legacy` exclusivamente como contingencia técnica. La entrada oficial es `/admin/panel`.
+El panel enterprise es la única interfaz visual administrativa. El panel legacy, sus assets y sus rutas visuales fueron retirados después de validar que ya no tenían consumidores funcionales. La entrada oficial es `/admin/panel`.
 
 ## Seguridad
 

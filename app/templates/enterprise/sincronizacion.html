@@ -1,5 +1,37 @@
-{% extends "enterprise/base.html" %}{% block content %}
-<div class="metric-grid"><article class="metric"><span>Programador</span><strong>{% if settings.stock_scheduler_enabled %}Activo{% else %}Pausado{% endif %}</strong><small>Cada {{ settings.stock_sync_interval_minutes }} min</small></article><article class="metric"><span>Último estado</span><strong>{{ stock_sync.estado or 'Sin datos' }}</strong><small>Sincronización de stock</small></article><article class="metric"><span>Procesados</span><strong>{{ stock_sync.procesados or 0 }}</strong><small>Última ejecución</small></article><article class="metric danger"><span>Errores</span><strong>{{ stock_sync.errores or 0 }}</strong><small>Requieren revisión</small></article></div>
-<div class="layout-2"><section class="card"><div class="card-head"><div><span class="eyebrow">STOCK</span><h3>Sincronización masiva</h3></div></div><form class="form-stack job-form" action="/admin/panel/stock/run-now" method="post" data-job-form><label>Límite de productos<input type="number" name="batch_limit" min="1" max="1000" value="100"></label><button class="btn primary large">Sincronizar stock ahora</button></form></section><section class="card"><div class="card-head"><div><span class="eyebrow">ARTÍCULO</span><h3>Sincronización individual</h3></div></div><form class="form-stack job-form" action="/admin/panel/stock/run-sku" method="post" data-job-form><label>SKU<input name="sku" required placeholder="Ej. 8082"></label><button class="btn large">Actualizar un SKU</button></form></section></div>
-<section class="card"><div class="card-head"><div><span class="eyebrow">MONITOREO</span><h3>Ejecuciones recientes</h3></div><a href="/admin/panel/trabajos">Centro de trabajos</a></div><div class="job-list">{% for job in jobs_recientes %}<a class="job-row" href="/admin/panel/trabajos"><span class="job-icon">↻</span><div><strong>{{ job.tipo or job.nombre or 'Trabajo' }}</strong><small>#{{ job.id }} · {{ job.estado }}</small></div><div class="progress"><i style="width:{{ job.progreso_porcentaje or 0 }}%"></i></div><b>{{ job.progreso_porcentaje or 0 }}%</b></a>{% else %}<div class="empty"><strong>Sin ejecuciones registradas</strong></div>{% endfor %}</div></section>
+{% extends "enterprise/base.html" %}
+{% block content %}
+<div class="metric-grid">
+  <article class="metric"><span>Programador</span><strong>{% if settings.stock_scheduler_enabled %}Activo{% else %}Pausado{% endif %}</strong><small>Cada {{ settings.stock_sync_interval_minutes }} min</small></article>
+  <article class="metric"><span>Última sincronización</span><strong>{{ stock_sync.ultima_sync_stock or 'Sin datos' }}</strong><small>Marca de tiempo registrada</small></article>
+  <article class="metric"><span>Con stock sincronizado</span><strong>{{ stock_sync.productos_con_stock_sync or 0 }}</strong><small>Mapeos procesados al menos una vez</small></article>
+  <article class="metric"><span>Pendientes</span><strong>{{ stock_sync.productos_pendientes_stock_sync or 0 }}</strong><small>Mapeos activos sin ciclo registrado</small></article>
+</div>
+<div class="layout-2">
+  <section class="card">
+    <div class="card-head"><div><span class="eyebrow">STOCK</span><h3>Sincronización masiva</h3></div></div>
+    <form class="form-stack job-form" action="/admin/panel/stock/run-now" method="post" data-job-form>
+      <label>Límite de productos<input type="number" name="batch_limit" min="1" max="1000" value="100"></label>
+      <button class="btn primary large">Sincronizar stock ahora</button>
+    </form>
+  </section>
+  <section class="card">
+    <div class="card-head"><div><span class="eyebrow">ARTÍCULO</span><h3>Sincronización individual</h3></div></div>
+    <form class="form-stack job-form" action="/admin/panel/stock/run-sku" method="post" data-job-form>
+      <label>SKU<input name="sku" required placeholder="Ej. 8082"></label>
+      <button class="btn large">Actualizar un SKU</button>
+    </form>
+  </section>
+</div>
+<section class="card">
+  <div class="card-head"><div><span class="eyebrow">VÍNCULOS</span><h3>Reconciliación Tiendanube</h3></div></div>
+  <div class="callout"><strong>Autorreparación activa</strong><p>Si una actualización de stock recibe 404, el integrador vuelve a localizar el SKU en Tiendanube, corrige product/variant ID y reintenta una sola vez. Si el SKU ya no existe, retira ese mapeo de los lotes automáticos.</p></div>
+  <form class="form-inline" action="/admin/panel/mapeos/reconciliar-tn" method="post" data-job-form>
+    <label>Mapeos a verificar<input type="number" name="limit" min="1" max="1000" value="500"></label>
+    <button class="btn">Reconciliar vínculos ahora</button>
+  </form>
+</section>
+<section class="card">
+  <div class="card-head"><div><span class="eyebrow">MONITOREO</span><h3>Ejecuciones recientes</h3></div><a href="/admin/panel/trabajos">Centro de trabajos</a></div>
+  <div class="job-list">{% for job in jobs_recientes %}<a class="job-row" href="/admin/panel/trabajos"><span class="job-icon">↻</span><div><strong>{{ job.tipo or job.nombre or 'Trabajo' }}</strong><small>#{{ job.id }} · {{ job.estado }}</small></div><div class="progress"><i style="width:{{ job.progreso_porcentaje or 0 }}%"></i></div><b>{{ job.progreso_porcentaje or 0 }}%</b></a>{% else %}<div class="empty"><strong>Sin ejecuciones registradas</strong></div>{% endfor %}</div>
+</section>
 {% endblock %}

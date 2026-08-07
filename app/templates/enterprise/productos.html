@@ -1,4 +1,90 @@
-{% extends "enterprise/base.html" %}{% block content %}
-<div class="page-actions"><div class="tabs"><a class="{% if vista=='todos' %}active{% endif %}" href="?vista=todos">Todos</a><a class="{% if vista=='importados' %}active{% endif %}" href="?vista=importados">Importados</a><a class="{% if vista=='bloqueados' %}active{% endif %}" href="?vista=bloqueados">Bloqueados</a></div><a class="btn primary" href="/admin/panel/importaciones">Importar producto</a></div>
-<section class="card table-card"><div class="table-toolbar"><label class="search"><span>⌕</span><input id="tableSearch" placeholder="Buscar por SKU, título o decisión"></label><div class="muted">Mostrando {{ items|length }} registros</div></div><div class="table-wrap"><table><thead><tr><th>Producto</th><th>Identificación</th><th>Clasificación</th><th>Precio / stock</th><th>Decisión</th><th>Tiendanube</th><th></th></tr></thead><tbody id="productRows">{% for item in items %}<tr><td><div class="product-cell"><div class="thumb">{{ (item.sku or '?')[:2] }}</div><div><strong>{{ item.titulo or item.descripcion or item.sku or 'Sin título' }}</strong><small>{{ item.marca or 'Sin marca' }}</small></div></div></td><td><strong>{{ item.sku or '—' }}</strong><small class="block">GBP {{ item.item_id or '—' }}</small></td><td>{{ item.categoria or '—' }}<small class="block">{{ item.subcategoria or '' }}</small></td><td><strong>{% if item.precio_importado is not none %}${{ item.precio_importado }}{% else %}—{% endif %}</strong><small class="block">Stock {{ item.stock_publicable_tn if item.stock_publicable_tn is not none else '—' }}</small></td><td><span class="badge {% if item.decision in ['PUBLICABLE_AUTOMATICO', 'PUBLICABLE_CONSULTAR_PRECIO'] %}success{% else %}warning{% endif %}">{{ item.decision or 'PENDIENTE' }}</span></td><td>{% if item.tn_product_id or item.product_id %}<span class="badge success">Vinculado</span><small class="block">{{ item.tn_product_id or item.product_id }}</small>{% else %}<span class="badge neutral">Sin vincular</span>{% endif %}</td><td><button class="more-btn">•••</button></td></tr>{% else %}<tr><td colspan="7"><div class="empty"><strong>No hay productos para esta vista</strong><p>Cambiá el filtro o ejecutá una auditoría.</p></div></td></tr>{% endfor %}</tbody></table></div><div class="pagination"><a class="btn" href="?vista={{ vista }}&limit={{ limit }}&offset={{ prev_offset }}">Anterior</a><span>Desde {{ offset + 1 }}</span><a class="btn" href="?vista={{ vista }}&limit={{ limit }}&offset={{ next_offset }}">Siguiente</a></div></section>
+{% extends "enterprise/base.html" %}
+{% block content %}
+<div class="page-actions product-page-actions">
+  <div class="tabs" aria-label="Vistas de productos">
+    <a class="{% if vista=='todos' %}active{% endif %}" href="?vista=todos">Todos</a>
+    <a class="{% if vista=='importados' %}active{% endif %}" href="?vista=importados">Importados</a>
+    <a class="{% if vista=='bloqueados' %}active{% endif %}" href="?vista=bloqueados">Bloqueados</a>
+  </div>
+  <a class="btn primary" href="/admin/panel/importaciones">Importar producto</a>
+</div>
+
+<section class="card table-card">
+  <div class="table-toolbar">
+    <label class="search"><span>⌕</span><input id="tableSearch" placeholder="Buscar por SKU, título, categoría o decisión"></label>
+    <div class="muted">Mostrando {{ items|length }} registros</div>
+  </div>
+  <div class="table-wrap product-table-wrap">
+    <table class="product-table">
+      <thead><tr><th>Producto</th><th>Identificación</th><th>Clasificación</th><th>Precio / stock</th><th>Decisión</th><th>Tiendanube</th><th class="actions-column">Acciones</th></tr></thead>
+      <tbody id="productRows">
+      {% for item in items %}
+        {% set linked = item.ya_importado_tienda_nube or (item.tn_product_id and item.estado_publicacion not in ['eliminado_tn','eliminado_externo','vinculacion_obsoleta']) %}
+        {% set blocked = item.decision not in ['PUBLICABLE_AUTOMATICO','PUBLICABLE_CONSULTAR_PRECIO'] %}
+        <tr>
+          <td>
+            <div class="product-cell">
+              <div class="thumb">{{ (item.sku or '?')[:2] }}</div>
+              <div class="product-copy">
+                <strong class="truncate-2" title="{{ item.titulo or item.sku or 'Sin título' }}">{{ item.titulo or item.sku or 'Sin título' }}</strong>
+                <small class="truncate-1" title="{{ item.marca or 'Sin marca' }}">{{ item.marca or 'Sin marca' }}</small>
+              </div>
+            </div>
+          </td>
+          <td>
+            <strong>{{ item.sku or '—' }}</strong>
+            <small class="block">GBP {{ item.id_sistema_gbp or '—' }}</small>
+            {% if item.codigo_proveedor %}<small class="block truncate-1" title="Proveedor: {{ item.codigo_proveedor }}">Prov. {{ item.codigo_proveedor }}</small>{% endif %}
+          </td>
+          <td class="classification-cell">
+            <span class="truncate-1" title="{{ item.categoria or 'Sin categoría' }}">{{ item.categoria or '—' }}</span>
+            <small class="block truncate-1" title="{{ item.subcategoria or '' }}">{{ item.subcategoria or '' }}</small>
+          </td>
+          <td>
+            <strong>{% if item.precio_importado is not none %}${{ '%.2f'|format(item.precio_importado) }}{% else %}—{% endif %}</strong>
+            <small class="block">Stock {{ item.stock_publicable_tn if item.stock_publicable_tn is not none else '—' }}</small>
+          </td>
+          <td>
+            <span class="badge {% if not blocked %}success{% else %}warning{% endif %} decision-badge" title="{{ item.decision or 'PENDIENTE' }}">{{ (item.decision or 'PENDIENTE')|replace('_',' ') }}</span>
+            {% if item.motivos_bloqueo %}<small class="block truncate-1" title="{{ item.motivos_bloqueo|join(', ') }}">{{ item.motivos_bloqueo|join(', ') }}</small>{% endif %}
+          </td>
+          <td>
+            {% if linked %}
+              <span class="badge success">Vinculado</span>
+              <small class="block">P {{ item.tn_product_id }}</small>
+              {% if item.tn_variant_id %}<small class="block">V {{ item.tn_variant_id }}</small>{% endif %}
+            {% elif item.tn_product_id %}
+              <span class="badge warning">{{ (item.estado_publicacion or 'No activo')|replace('_',' ')|title }}</span>
+              <small class="block">P {{ item.tn_product_id }}</small>
+            {% else %}
+              <span class="badge neutral">Sin vincular</span>
+            {% endif %}
+          </td>
+          <td class="actions-cell">
+            <div class="product-menu-wrap">
+              <button class="more-btn" type="button" data-product-menu-button aria-haspopup="menu" aria-expanded="false" aria-controls="product-menu-{{ loop.index }}" title="Acciones para {{ item.sku }}">•••</button>
+              <div class="product-menu" id="product-menu-{{ loop.index }}" data-product-menu role="menu" hidden>
+                {% if linked %}<button type="button" role="menuitem" data-product-action="stock" data-sku="{{ item.sku }}">Sincronizar stock</button>{% endif %}
+                <button type="button" role="menuitem" data-product-action="import" data-sku="{{ item.sku }}" data-force="{{ 'true' if blocked else 'false' }}">{% if linked %}Reimportar / actualizar{% else %}Importar producto{% endif %}</button>
+                {% if linked %}
+                  <div class="menu-separator"></div>
+                  <button type="button" role="menuitem" data-product-action="hide" data-sku="{{ item.sku }}">Ocultar en Tiendanube</button>
+                  <button class="danger-action" type="button" role="menuitem" data-product-action="delete" data-sku="{{ item.sku }}">Eliminar de Tiendanube</button>
+                {% endif %}
+              </div>
+            </div>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7"><div class="empty"><strong>No hay productos para esta vista</strong><p>Cambiá el filtro o ejecutá una auditoría.</p></div></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="pagination">
+    <a class="btn {% if offset == 0 %}disabled{% endif %}" href="?vista={{ vista }}&limit={{ limit }}&offset={{ prev_offset }}" {% if offset == 0 %}aria-disabled="true" tabindex="-1"{% endif %}>Anterior</a>
+    <span>Registros {{ offset + 1 }}–{{ offset + items|length }}</span>
+    <a class="btn {% if items|length < limit %}disabled{% endif %}" href="?vista={{ vista }}&limit={{ limit }}&offset={{ next_offset }}" {% if items|length < limit %}aria-disabled="true" tabindex="-1"{% endif %}>Siguiente</a>
+  </div>
+</section>
 {% endblock %}
