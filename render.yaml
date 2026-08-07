@@ -24,6 +24,10 @@ services:
         value: INFO
       - key: DATABASE_URL
         sync: false
+      - key: GBP_RETRY_ATTEMPTS
+        value: "3"
+      - key: GBP_RETRY_BACKOFF_SECONDS
+        value: "1.0"
       - key: GBP_USERNAME
         sync: false
       - key: GBP_PASSWORD

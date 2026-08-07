@@ -91,6 +91,8 @@ async def listar_exportaciones_gbp() -> dict[str, object]:
         timeout_seconds=max(settings.gbp_timeout_seconds, 120),
         company_id=settings.gbp_company_id,
         web_service_id=settings.gbp_web_service_id,
+        retry_attempts=settings.gbp_retry_attempts,
+        retry_backoff_seconds=settings.gbp_retry_backoff_seconds,
     )
     proveedor = ProveedorExportacionesGBP(cliente, cache_seconds=0)
     definiciones = [
@@ -187,6 +189,8 @@ async def previsualizar_producto_exportado(item_code: str) -> dict[str, object]:
         timeout_seconds=max(settings.gbp_timeout_seconds, 180),
         company_id=settings.gbp_company_id,
         web_service_id=settings.gbp_web_service_id,
+        retry_attempts=settings.gbp_retry_attempts,
+        retry_backoff_seconds=settings.gbp_retry_backoff_seconds,
     )
     proveedor = ProveedorExportacionesGBP(
         cliente, cache_seconds=settings.gbp_export_cache_seconds
@@ -483,8 +487,9 @@ def panel_listar_jobs(db: Session = Depends(obtener_sesion_bd)) -> JSONResponse:
     return JSONResponse(
         {
             "ok": True,
-            "activos": repo.listar_activos(limit=12),
-            "recientes": repo.listar_recientes(limit=12),
+            "activos": repo.listar_activos(limit=30),
+            "recientes": repo.listar_recientes(limit=100),
+            "conteos": repo.contar_por_estado(),
         }
     )
 

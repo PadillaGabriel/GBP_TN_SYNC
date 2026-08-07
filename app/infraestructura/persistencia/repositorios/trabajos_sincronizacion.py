@@ -88,6 +88,13 @@ class RepositorioTrabajosSincronizacion:
                 progreso = json.loads(job.error_mensaje)
             except json.JSONDecodeError:
                 progreso = {"mensaje": job.error_mensaje}
+        progreso_dict = progreso if isinstance(progreso, dict) else {}
+        porcentaje = progreso_dict.get("porcentaje", 0)
+        try:
+            porcentaje = max(0, min(100, int(float(porcentaje or 0))))
+        except (TypeError, ValueError):
+            porcentaje = 0
+
         return {
             "id": job.id,
             "tipo": job.tipo,
@@ -97,7 +104,14 @@ class RepositorioTrabajosSincronizacion:
             "prioridad": job.prioridad,
             "intentos": job.intentos,
             "error_codigo": job.error_codigo,
-            "progreso": progreso,
+            "progreso": progreso_dict,
+            # Campos aplanados para el panel. Conservamos `progreso` como contrato
+            # estructurado de API, pero evitamos que cada vista reimplemente parsing.
+            "progreso_porcentaje": porcentaje,
+            "mensaje": progreso_dict.get("mensaje") or "",
+            "procesados": progreso_dict.get("procesados") or 0,
+            "total": progreso_dict.get("total") or progreso_dict.get("seleccionados") or 0,
+            "errores": progreso_dict.get("errores") or 0,
             "created_at": job.created_at.isoformat() if job.created_at else None,
             "started_at": job.started_at.isoformat() if job.started_at else None,
             "finished_at": job.finished_at.isoformat() if job.finished_at else None,

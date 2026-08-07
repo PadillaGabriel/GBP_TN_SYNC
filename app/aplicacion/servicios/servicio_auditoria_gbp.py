@@ -56,6 +56,8 @@ class GBPAuditService:
             timeout_seconds=settings.gbp_timeout_seconds,
             company_id=settings.gbp_company_id,
             web_service_id=settings.gbp_web_service_id,
+            retry_attempts=settings.gbp_retry_attempts,
+            retry_backoff_seconds=settings.gbp_retry_backoff_seconds,
         )
         self.normalizer = GBPNormalizer()
         self.validation_service = ProductoValidationService()

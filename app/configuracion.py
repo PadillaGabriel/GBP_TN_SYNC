@@ -35,7 +35,8 @@ class ConfiguracionAplicacion(BaseSettings):
     gbp_company_id: str = ""
     gbp_web_service_id: str = ""
     gbp_timeout_seconds: int = 20
-    gbp_retry_attempts: int = 2
+    gbp_retry_attempts: int = 3
+    gbp_retry_backoff_seconds: float = 1.0
     gbp_module16_strict: bool = True
 
     gbp_export_producto_por_item_id: int = 11

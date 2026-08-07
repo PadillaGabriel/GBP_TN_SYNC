@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -44,6 +45,8 @@ class StockSyncService:
             timeout_seconds=settings.gbp_timeout_seconds,
             company_id=settings.gbp_company_id,
             web_service_id=settings.gbp_web_service_id,
+            retry_attempts=settings.gbp_retry_attempts,
+            retry_backoff_seconds=settings.gbp_retry_backoff_seconds,
         )
         self.tn = ClienteTiendaNube(
             base_url=settings.tienda_nube_base_url,
@@ -56,8 +59,13 @@ class StockSyncService:
             self.gbp, cache_seconds=settings.gbp_export_cache_seconds
         )
 
-    async def sincronizar_lote(self, *, limit: int = 100) -> dict[str, Any]:
-        """Sincroniza stock de los primeros mapeos activos disponibles."""
+    async def sincronizar_lote(
+        self,
+        *,
+        limit: int = 100,
+        on_progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        """Sincroniza stock de una tanda y opcionalmente informa avance incremental."""
 
         started = time.perf_counter()
         items = self.productos.listar_mapeos_activos_para_stock(limit=limit)
@@ -75,12 +83,21 @@ class StockSyncService:
             str(row.get("item_id") or "").strip(): row for row in snapshot.filas
         }
         resultados: list[dict[str, Any]] = []
-        for item in items:
+        for index, item in enumerate(items, start=1):
             result = await self._sincronizar_item(
                 item, fila_stock=por_item.get(str(item["id_sistema_gbp"]))
             )
             resultados.append(result)
             self._sumar_resultado(resumen, result)
+            if on_progress is not None:
+                on_progress(
+                    {
+                        **resumen,
+                        "procesados": index,
+                        "total": len(items),
+                        "sku_actual": str(item.get("sku") or ""),
+                    }
+                )
 
         resumen["ok"] = resumen["errores"] == 0
         resumen["resultados_muestra"] = resultados[:20]

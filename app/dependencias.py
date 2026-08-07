@@ -51,6 +51,8 @@ def obtener_cliente_gbp() -> ClienteGBP:
         timeout_seconds=configuracion.gbp_timeout_seconds,
         company_id=configuracion.gbp_company_id,
         web_service_id=configuracion.gbp_web_service_id,
+        retry_attempts=configuracion.gbp_retry_attempts,
+        retry_backoff_seconds=configuracion.gbp_retry_backoff_seconds,
     )
 
 

@@ -626,7 +626,29 @@ async def ejecutar_job_stock_lote(
                 },
             )
             service = StockSyncService(settings=settings, db=db)
-            result = await service.sincronizar_lote(limit=batch_limit)
+
+            def informar_avance_stock(avance: dict[str, object]) -> None:
+                procesados = int(avance.get("procesados") or 0)
+                total = int(avance.get("total") or avance.get("seleccionados") or 0)
+                # Reservamos el 5% inicial para la descarga del snapshot GBP.
+                porcentaje = 5 if total <= 0 else 5 + int((procesados / total) * 90)
+                _update_job(
+                    job_id,
+                    estado="EN_PROCESO",
+                    progreso={
+                        **avance,
+                        "mensaje": (
+                            f"Sincronizando stock {procesados}/{total}"
+                            + (f" · SKU {avance.get('sku_actual')}" if avance.get("sku_actual") else "")
+                        ),
+                        "porcentaje": max(5, min(95, porcentaje)),
+                    },
+                )
+
+            result = await service.sincronizar_lote(
+                limit=batch_limit,
+                on_progress=informar_avance_stock,
+            )
         _update_job(
             job_id,
             estado="FINALIZADO"

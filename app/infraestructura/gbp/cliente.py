@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -89,6 +90,8 @@ class ClienteGBP:
         timeout_seconds: int,
         company_id: str = "",
         web_service_id: str = "",
+        retry_attempts: int = 3,
+        retry_backoff_seconds: float = 1.0,
     ) -> None:
         self.base_url = base_url
         self.username = username
@@ -96,6 +99,8 @@ class ClienteGBP:
         self.company_id = company_id
         self.web_service_id = web_service_id
         self.timeout = httpx.Timeout(timeout_seconds)
+        self.retry_attempts = max(1, int(retry_attempts))
+        self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
 
     async def autenticar(self) -> str:
         """Autentica contra GBP y devuelve token temporal."""
@@ -442,16 +447,67 @@ class ClienteGBP:
             "SOAPAction": f"{SOAP_ACTION_PREFIX}/{method_name}",
         }
 
+        response: httpx.Response | None = None
         start = time.perf_counter()
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(
-                self.base_url,
-                content=envelope.encode("utf-8"),
-                headers=headers,
-            )
-        duration_ms = int((time.perf_counter() - start) * 1000)
+        retryable_exceptions = (
+            httpx.ConnectTimeout,
+            httpx.ReadTimeout,
+            httpx.ConnectError,
+            httpx.RemoteProtocolError,
+        )
 
-        response.raise_for_status()
+        for attempt in range(1, self.retry_attempts + 1):
+            try:
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    response = await client.post(
+                        self.base_url,
+                        content=envelope.encode("utf-8"),
+                        headers=headers,
+                    )
+                if response.status_code in (429, 502, 503, 504) and attempt < self.retry_attempts:
+                    delay = self.retry_backoff_seconds * (2 ** (attempt - 1))
+                    logger.warning(
+                        "gbp_soap_retry_http",
+                        extra={
+                            "method": method_name,
+                            "attempt": attempt,
+                            "max_attempts": self.retry_attempts,
+                            "status_code": response.status_code,
+                            "delay_seconds": delay,
+                        },
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                response.raise_for_status()
+                break
+            except retryable_exceptions as exc:
+                if attempt >= self.retry_attempts:
+                    logger.error(
+                        "gbp_soap_retry_exhausted",
+                        extra={
+                            "method": method_name,
+                            "attempts": attempt,
+                            "error_type": type(exc).__name__,
+                        },
+                    )
+                    raise
+                delay = self.retry_backoff_seconds * (2 ** (attempt - 1))
+                logger.warning(
+                    "gbp_soap_retry_transport",
+                    extra={
+                        "method": method_name,
+                        "attempt": attempt,
+                        "max_attempts": self.retry_attempts,
+                        "error_type": type(exc).__name__,
+                        "delay_seconds": delay,
+                    },
+                )
+                await asyncio.sleep(delay)
+
+        if response is None:
+            raise RuntimeError(f"GBP no devolvió respuesta para {method_name}")
+
+        duration_ms = int((time.perf_counter() - start) * 1000)
 
         soap_text = decode_gbp_response(
             content=response.content,
