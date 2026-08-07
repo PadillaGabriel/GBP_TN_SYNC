@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from app.infraestructura.persistencia.repositorios import (
     RepositorioAuditoriaSincronizacion,
     RepositorioProductos,
     RepositorioTrabajosSincronizacion,
+    RepositorioNormalizacionCategorias,
 )
 
 router = APIRouter(prefix="/admin/panel", tags=["panel-enterprise"])
@@ -111,6 +112,31 @@ def sincronizacion(
         }
     )
     return templates.TemplateResponse("enterprise/sincronizacion.html", context)
+
+
+
+
+@router.get("/categorias", response_class=HTMLResponse)
+def categorias(
+    request: Request,
+    db: Session = Depends(obtener_sesion_bd),
+) -> HTMLResponse:
+    repo = RepositorioNormalizacionCategorias(db)
+    context = _base_context(request, "categorias", "Normalización de categorías")
+    context.update(
+        {
+            "aliases": repo.listar(),
+            "origenes": repo.origenes_gbp(),
+            "total_aliases": repo.contar(),
+        }
+    )
+    return templates.TemplateResponse("enterprise/categorias.html", context)
+
+
+@router.get("/categorias/normalizar-duplicadas", include_in_schema=False)
+def categorias_normalizar_duplicadas_get() -> RedirectResponse:
+    # Evita el 405 al abrir manualmente la URL de acción en el navegador.
+    return RedirectResponse(url="/admin/panel/categorias", status_code=303)
 
 
 @router.get("/pedidos", response_class=HTMLResponse)

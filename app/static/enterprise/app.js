@@ -1,3 +1,4 @@
+import { initializeCategories } from "./features/categorias.js";
 import { initializeConfirmations } from "./features/confirmations.js";
 import { initializeExports } from "./features/exportaciones.js";
 import { initializeJobs } from "./features/jobs.js";
@@ -13,6 +14,7 @@ function initialize() {
   initializeExports();
   initializeOrders();
   initializeProductActions();
+  initializeCategories();
   initializeConfirmations();
 }
 

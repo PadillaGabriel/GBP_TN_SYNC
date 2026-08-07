@@ -1,0 +1,46 @@
+{% extends "enterprise/base.html" %}{% block content %}
+<section class="hero compact-hero">
+  <div><span class="eyebrow">TAXONOMÍA COMERCIAL</span><h2>Diccionario de categorías GBP → Tiendanube</h2><p class="lead">Definí una única categoría canónica sin alterar el dato fuente de GBP. Las próximas importaciones resolverán primero este diccionario y recién después buscarán o crearán categorías en Tiendanube.</p></div>
+  <div class="metric"><span>Equivalencias</span><strong>{{ total_aliases }}</strong><small>Persistidas en PostgreSQL</small></div>
+</section>
+
+<div class="layout-2 category-layout">
+  <section class="card">
+    <div class="card-head"><div><span class="eyebrow">NUEVA EQUIVALENCIA</span><h3>Normalizar un nombre</h3></div></div>
+    <form id="categoryAliasForm" class="form-stack">
+      <label>Tipo<select id="categoryType" name="tipo"><option value="categoria">Categoría</option><option value="subcategoria">Subcategoría</option></select></label>
+      <label>Valor recibido desde GBP<input name="valor_origen" id="categoryOrigin" list="gbpCategoryOrigins" required placeholder="Ej. COCINA Y ACCESORIOS"></label>
+      <label>Nombre canónico<input name="valor_canonico" required placeholder="Ej. Cocina"></label>
+      <label id="categoryParentField" hidden>Categoría padre canónica<input name="categoria_padre_canonica" list="canonicalParents" placeholder="Ej. Cocina"></label>
+      <label>Observación <span class="muted">(opcional)</span><input name="observacion" placeholder="Motivo o criterio comercial"></label>
+      <button class="btn primary" type="submit">Guardar equivalencia</button>
+    </form>
+    <datalist id="gbpCategoryOrigins">{% for item in origenes.categorias %}<option value="{{ item.valor }}">{{ item.productos }} productos</option>{% endfor %}</datalist>
+    <datalist id="canonicalParents">{% for item in origenes.categorias %}<option value="{{ item.valor }}">{% endfor %}</datalist>
+    <datalist id="gbpSubcategoryOrigins">{% for item in origenes.subcategorias %}<option value="{{ item.valor }}">{{ item.categoria }} · {{ item.productos }} productos</option>{% endfor %}</datalist>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div><span class="eyebrow">TIENDANUBE</span><h3>Limpiar duplicados existentes</h3></div></div>
+    <div class="callout warning"><strong>Primero diagnosticá.</strong><p>El diagnóstico no escribe. La ejecución real reasigna productos a IDs canónicos y elimina categorías duplicadas vacías. También respeta las equivalencias comerciales definidas en esta pantalla.</p></div>
+    <div class="button-stack">
+      <button class="btn" type="button" data-category-dedupe="false">Diagnosticar duplicados</button>
+      <button class="btn danger-outline" type="button" data-category-dedupe="true">Normalizar Tiendanube</button>
+    </div>
+  </section>
+</div>
+
+<section class="card table-card">
+  <div class="table-toolbar"><div><strong>Equivalencias activas</strong><div class="muted">La fuente GBP se conserva; este diccionario solo decide el nombre comercial usado al publicar.</div></div></div>
+  <div class="table-wrap"><table class="category-table"><thead><tr><th>Tipo</th><th>Origen GBP</th><th>Canónica</th><th>Padre</th><th>Observación</th><th></th></tr></thead><tbody>
+  {% for item in aliases %}<tr>
+    <td><span class="badge neutral">{{ item.tipo }}</span></td>
+    <td><strong>{{ item.valor_origen }}</strong></td>
+    <td><strong>{{ item.valor_canonico }}</strong></td>
+    <td>{{ item.categoria_padre_canonica or '—' }}</td>
+    <td class="wrap-cell">{{ item.observacion or '—' }}</td>
+    <td class="actions-cell"><button class="more-btn danger-text" type="button" data-category-alias-delete="{{ item.id }}" title="Eliminar equivalencia">×</button></td>
+  </tr>{% else %}<tr><td colspan="6" class="empty">Todavía no hay equivalencias comerciales. La normalización técnica de acentos, espacios y mayúsculas sigue activa.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}

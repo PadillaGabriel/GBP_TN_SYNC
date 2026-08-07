@@ -10,6 +10,7 @@ from app.infraestructura.tienda_nube.utilidades_categorias import normalize_cate
 from app.infraestructura.tienda_nube.cliente import ClienteTiendaNube
 from app.infraestructura.persistencia.repositorios import (
     RepositorioAuditoriaSincronizacion,
+    RepositorioNormalizacionCategorias,
 )
 from app.configuracion import ConfiguracionAplicacion
 
@@ -37,9 +38,11 @@ class TiendaNubeCategoryService:
         *,
         settings: ConfiguracionAplicacion,
         audit_repo: RepositorioAuditoriaSincronizacion | None = None,
+        category_repo: RepositorioNormalizacionCategorias | None = None,
     ) -> None:
         self.settings = settings
         self.audit_repo = audit_repo
+        self.category_repo = category_repo
         self.client = ClienteTiendaNube(
             base_url=settings.tienda_nube_base_url,
             store_id=settings.tienda_nube_store_id,
@@ -174,57 +177,86 @@ class TiendaNubeCategoryService:
         *,
         confirm: bool,
     ) -> tuple[dict[int, int], list[dict[str, Any]]]:
+        """Construye el mapa usando tanto normalización técnica como aliases comerciales."""
+
         id_map: dict[int, int] = {}
         categorias_a_crear: list[dict[str, Any]] = []
-        roots = [node for node in nodes if node.parent_id is None]
-        children = [node for node in nodes if node.parent_id is not None]
+        roots = sorted((node for node in nodes if node.parent_id is None), key=lambda n: n.id)
+        children = sorted((node for node in nodes if node.parent_id is not None), key=lambda n: n.id)
 
-        root_canonical_by_name: dict[str, _CategoryNode] = {}
-        for node in sorted(roots, key=lambda item: item.id):
-            canonical = root_canonical_by_name.setdefault(node.normalized_name, node)
-            id_map[node.id] = canonical.id
+        root_groups: dict[str, list[_CategoryNode]] = {}
+        root_label: dict[str, str] = {}
+        for node in roots:
+            canonical_name = self._resolve_business_name("categoria", node.name, None) or node.name
+            key = normalize_category_key(canonical_name)
+            root_groups.setdefault(key, []).append(node)
+            root_label.setdefault(key, canonical_name)
 
-        # Hijos: se canonizan bajo el padre raíz canónico. Si el hijo existe bajo un
-        # padre duplicado pero no bajo el padre canónico, se crea el hijo canónico.
-        child_canonical_by_key: dict[tuple[int, str], int] = {}
-        for node in sorted(children, key=lambda item: item.id):
+        canonical_root_name_by_id: dict[int, str] = {}
+        for key, group in root_groups.items():
+            label = root_label[key]
+            exact = next((n for n in group if normalize_category_key(n.name) == key), None)
+            canonical_id = exact.id if exact is not None else None
+            if canonical_id is None:
+                payload = {"name": {"es": label}}
+                categorias_a_crear.append(payload)
+                if confirm:
+                    created = await self.client.create_category(payload)
+                    await asyncio.sleep(0.35)
+                    canonical_id = self._extract_id(created)
+            if canonical_id is None:
+                canonical_id = group[0].id
+            canonical_root_name_by_id[canonical_id] = label
+            for node in group:
+                id_map[node.id] = canonical_id
+
+        child_groups: dict[tuple[int, str], list[_CategoryNode]] = {}
+        child_label: dict[tuple[int, str], str] = {}
+        for node in children:
             target_parent_id = id_map.get(node.parent_id or 0, node.parent_id)
             if target_parent_id is None:
                 continue
-            key = (target_parent_id, node.normalized_name)
-            existing = child_canonical_by_key.get(key)
-            if existing is not None:
-                id_map[node.id] = existing
-                continue
+            parent_name = canonical_root_name_by_id.get(target_parent_id)
+            canonical_name = self._resolve_business_name(
+                "subcategoria", node.name, parent_name
+            ) or node.name
+            key = (target_parent_id, normalize_category_key(canonical_name))
+            child_groups.setdefault(key, []).append(node)
+            child_label.setdefault(key, canonical_name)
 
-            if node.parent_id == target_parent_id:
-                child_canonical_by_key[key] = node.id
-                id_map[node.id] = node.id
-                continue
-
-            payload = {"name": {"es": node.name}, "parent": target_parent_id}
-            categorias_a_crear.append(payload)
-            if confirm:
-                created = await self.client.create_category(payload)
-                await asyncio.sleep(0.35)
-                created_id = self._extract_id(created)
-                if created_id is not None:
-                    child_canonical_by_key[key] = created_id
-                    id_map[node.id] = created_id
-            else:
-                id_map[node.id] = node.id
-
-        # Segunda pasada por si había hijos duplicados bajo padres canónicos ya existentes.
-        for node in sorted(children, key=lambda item: item.id):
-            target_parent_id = id_map.get(node.parent_id or 0, node.parent_id)
-            if target_parent_id is None:
-                continue
-            key = (target_parent_id, node.normalized_name)
-            canonical_id = child_canonical_by_key.get(key)
-            if canonical_id is not None:
+        for key, group in child_groups.items():
+            target_parent_id, normalized_child = key
+            label = child_label[key]
+            exact = next(
+                (
+                    n
+                    for n in group
+                    if n.parent_id == target_parent_id
+                    and normalize_category_key(n.name) == normalized_child
+                ),
+                None,
+            )
+            canonical_id = exact.id if exact is not None else None
+            if canonical_id is None:
+                payload = {"name": {"es": label}, "parent": target_parent_id}
+                categorias_a_crear.append(payload)
+                if confirm:
+                    created = await self.client.create_category(payload)
+                    await asyncio.sleep(0.35)
+                    canonical_id = self._extract_id(created)
+            if canonical_id is None:
+                canonical_id = group[0].id
+            for node in group:
                 id_map[node.id] = canonical_id
 
         return id_map, categorias_a_crear
+
+    def _resolve_business_name(
+        self, tipo: str, value: str | None, parent_name: str | None
+    ) -> str | None:
+        if self.category_repo is None:
+            return value
+        return self.category_repo.resolver(tipo, value, parent_name)
 
     @classmethod
     def _build_nodes(cls, categories: list[dict[str, Any]]) -> list[_CategoryNode]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 from app.dominio.modelos.producto import Producto
@@ -34,8 +35,10 @@ class AdaptadorTiendaNube(PublicadorComercioElectronico):
         image_normalization_enabled: bool = False,
         image_normalization_base_url: str = "",
         image_normalization_canvas_size: int = 1600,
+        category_name_resolver: Callable[[str, str | None, str | None], str | None] | None = None,
     ) -> None:
         self.client = client
+        self.category_name_resolver = category_name_resolver
         self.builder = TiendaNubePayloadBuilder(
             image_normalization_enabled=image_normalization_enabled,
             image_normalization_base_url=image_normalization_base_url,
@@ -202,8 +205,14 @@ class AdaptadorTiendaNube(PublicadorComercioElectronico):
         """
 
         async with self._category_lock:
-            categoria = self._clean_category_name(producto.categoria_nombre)
-            subcategoria = self._clean_category_name(producto.subcategoria_nombre)
+            categoria_origen = self._clean_category_name(producto.categoria_nombre)
+            categoria = self._resolve_category_name(
+                "categoria", categoria_origen, None
+            )
+            subcategoria_origen = self._clean_category_name(producto.subcategoria_nombre)
+            subcategoria = self._resolve_category_name(
+                "subcategoria", subcategoria_origen, categoria
+            )
             if not categoria:
                 return []
 
@@ -228,6 +237,20 @@ class AdaptadorTiendaNube(PublicadorComercioElectronico):
 
             child_id = self._extract_id(child)
             return [parent_id, child_id] if child_id is not None else [parent_id]
+
+
+    def _resolve_category_name(
+        self,
+        tipo: str,
+        valor: str | None,
+        categoria_padre_canonica: str | None,
+    ) -> str | None:
+        if not valor:
+            return None
+        if self.category_name_resolver is None:
+            return valor
+        resolved = self.category_name_resolver(tipo, valor, categoria_padre_canonica)
+        return self._clean_category_name(resolved)
 
     @classmethod
     def _find_category(

@@ -150,6 +150,39 @@ class ProductoTiendaNubeModel(Base):
     )
 
 
+class CategoriaNormalizacionModel(Base):
+    """Alias comerciales GBP → nombre canónico usado en Tiendanube."""
+
+    __tablename__ = "categoria_normalizaciones"
+    __table_args__ = (
+        UniqueConstraint(
+            "tipo",
+            "clave_origen",
+            "contexto_padre",
+            name="uq_categoria_normalizacion_origen_contexto",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tipo: Mapped[str] = mapped_column(String(30), index=True)
+    valor_origen: Mapped[str] = mapped_column(String(240))
+    clave_origen: Mapped[str] = mapped_column(String(240), index=True)
+    valor_canonico: Mapped[str] = mapped_column(String(240), index=True)
+    clave_canonica: Mapped[str] = mapped_column(String(240), index=True)
+    categoria_padre_canonica: Mapped[str | None] = mapped_column(
+        String(240), nullable=True
+    )
+    contexto_padre: Mapped[str] = mapped_column(String(240), default="", index=True)
+    observacion: Mapped[str | None] = mapped_column(Text, nullable=True)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class DepositoEcommerceModel(Base):
     """Depositos habilitados para calcular stock publicable."""
 

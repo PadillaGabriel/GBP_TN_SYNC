@@ -16,6 +16,7 @@ from app.infraestructura.gbp.normalizador import GBPNormalizer
 from app.infraestructura.persistencia.repositorios import (
     RepositorioProductos,
     RepositorioAuditoriaSincronizacion,
+    RepositorioNormalizacionCategorias,
 )
 from app.infraestructura.tienda_nube.construccion_payload import (
     TiendaNubePayloadBuilder,
@@ -41,6 +42,7 @@ class TiendaNubeImportService:
         self.validation_service = ProductoValidationService()
         self.productos_repo = RepositorioProductos(db)
         self.audit_repo = RepositorioAuditoriaSincronizacion(db)
+        self.categorias_repo = RepositorioNormalizacionCategorias(db)
         self.payload_builder = TiendaNubePayloadBuilder()
         self.resolvedor_producto = ResolvedorProductoGBP(
             cliente_gbp=self.gbp_client,
@@ -48,7 +50,9 @@ class TiendaNubeImportService:
             configuracion=settings,
         )
         self.persistidor_producto = PersistidorProductoValidado(self.productos_repo)
-        self.fabrica_tienda_nube = FabricaAdaptadorTiendaNube(settings)
+        self.fabrica_tienda_nube = FabricaAdaptadorTiendaNube(
+            settings, category_name_resolver=self.categorias_repo.resolver
+        )
         from app.aplicacion.importacion_productos.casos_uso import (
             ContextoImportacionProductos,
             ImportarLoteProductos,

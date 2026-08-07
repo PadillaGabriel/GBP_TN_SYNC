@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from app.configuracion import ConfiguracionAplicacion
 from app.infraestructura.tienda_nube.adaptador import AdaptadorTiendaNube
 from app.infraestructura.tienda_nube.cliente import ClienteTiendaNube
@@ -8,8 +10,14 @@ from app.infraestructura.tienda_nube.cliente import ClienteTiendaNube
 class FabricaAdaptadorTiendaNube:
     """Construye el adaptador de Tienda Nube desde la configuración central."""
 
-    def __init__(self, configuracion: ConfiguracionAplicacion) -> None:
+    def __init__(
+        self,
+        configuracion: ConfiguracionAplicacion,
+        *,
+        category_name_resolver: Callable[[str, str | None, str | None], str | None] | None = None,
+    ) -> None:
         self._configuracion = configuracion
+        self._category_name_resolver = category_name_resolver
 
     def crear(self) -> AdaptadorTiendaNube:
         cliente = ClienteTiendaNube(
@@ -23,4 +31,5 @@ class FabricaAdaptadorTiendaNube:
             image_normalization_enabled=self._configuracion.image_normalization_enabled,
             image_normalization_base_url=self._configuracion.app_public_base_url,
             image_normalization_canvas_size=self._configuracion.image_normalization_canvas_size,
+            category_name_resolver=self._category_name_resolver,
         )

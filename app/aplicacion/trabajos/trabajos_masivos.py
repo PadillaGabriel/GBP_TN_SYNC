@@ -15,6 +15,7 @@ from app.infraestructura.persistencia.base_datos import SessionLocal
 from app.infraestructura.persistencia.repositorios import (
     RepositorioProductos,
     RepositorioAuditoriaSincronizacion,
+    RepositorioNormalizacionCategorias,
     RepositorioTrabajosSincronizacion,
 )
 from app.configuracion import obtener_configuracion
@@ -714,7 +715,9 @@ async def ejecutar_job_normalizar_categorias(
                 },
             )
             service = TiendaNubeCategoryService(
-                settings=settings, audit_repo=RepositorioAuditoriaSincronizacion(db)
+                settings=settings,
+                audit_repo=RepositorioAuditoriaSincronizacion(db),
+                category_repo=RepositorioNormalizacionCategorias(db),
             )
             result = await service.normalizar_categorias_duplicadas(confirm=confirm)
         errores = len(result.get("errores_productos", [])) + len(

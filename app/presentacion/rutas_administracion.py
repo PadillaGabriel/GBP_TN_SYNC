@@ -24,6 +24,7 @@ from app.infraestructura.persistencia.repositorios import (
     RepositorioProductos,
     RepositorioAuditoriaSincronizacion,
     RepositorioTrabajosSincronizacion,
+    RepositorioNormalizacionCategorias,
 )
 from app.configuracion import obtener_configuracion
 from app.aplicacion.importacion_productos.compositor_producto_exportaciones import (
@@ -682,6 +683,61 @@ async def panel_reconciliar_mapeos_tienda_nube(
             "status_url": f"/admin/panel/jobs/{job.id}",
         }
     )
+
+
+@router.get("/categorias/normalizaciones")
+def listar_normalizaciones_categorias(
+    db: Session = Depends(obtener_sesion_bd),
+) -> dict[str, object]:
+    repo = RepositorioNormalizacionCategorias(db)
+    return {
+        "ok": True,
+        "items": [
+            {
+                "id": item.id,
+                "tipo": item.tipo,
+                "valor_origen": item.valor_origen,
+                "valor_canonico": item.valor_canonico,
+                "categoria_padre_canonica": item.categoria_padre_canonica,
+                "observacion": item.observacion,
+                "activo": item.activo,
+            }
+            for item in repo.listar()
+        ],
+    }
+
+
+@router.post("/categorias/normalizaciones")
+def guardar_normalizacion_categoria(
+    tipo: str = Form(...),
+    valor_origen: str = Form(...),
+    valor_canonico: str = Form(...),
+    categoria_padre_canonica: str = Form(default=""),
+    observacion: str = Form(default=""),
+    db: Session = Depends(obtener_sesion_bd),
+) -> dict[str, object]:
+    repo = RepositorioNormalizacionCategorias(db)
+    item = repo.guardar(
+        tipo=tipo,
+        valor_origen=valor_origen,
+        valor_canonico=valor_canonico,
+        categoria_padre_canonica=categoria_padre_canonica or None,
+        observacion=observacion or None,
+    )
+    return {
+        "ok": True,
+        "id": item.id,
+        "mensaje": "Equivalencia guardada. Las próximas importaciones usarán el valor canónico.",
+    }
+
+
+@router.post("/categorias/normalizaciones/{alias_id}/eliminar")
+def eliminar_normalizacion_categoria(
+    alias_id: int,
+    db: Session = Depends(obtener_sesion_bd),
+) -> dict[str, object]:
+    eliminado = RepositorioNormalizacionCategorias(db).eliminar(alias_id)
+    return {"ok": eliminado, "id": alias_id, "mensaje": "Equivalencia eliminada."}
 
 
 @router.post("/panel/categorias/normalizar-duplicadas")
