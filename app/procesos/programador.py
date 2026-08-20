@@ -1,10 +1,12 @@
 import logging
 
+import httpx
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.aplicacion.servicios.servicio_sincronizacion_stock import StockSyncService
-from app.infraestructura.persistencia.base_datos import SessionLocal
 from app.configuracion import obtener_configuracion
+from app.infraestructura.persistencia.base_datos import SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +49,21 @@ class IntegradorScheduler:
 
         with SessionLocal() as db:
             service = StockSyncService(settings=self.settings, db=db)
-            result = await service.sincronizar_lote(
-                limit=self.settings.stock_sync_batch_size
-            )
+            try:
+                result = await service.sincronizar_lote(
+                    limit=self.settings.stock_sync_batch_size
+                )
+            except httpx.TransportError as exc:
+                logger.error(
+                    "stock_scheduler_tick_external_failure",
+                    extra={
+                        "provider": "GBP",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                )
+                return
+
             logger.info("stock_scheduler_tick_finished", extra={"result": result})
 
     async def _product_audit_tick(self) -> None:

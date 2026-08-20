@@ -8,9 +8,13 @@ const TERMINAL_STATES = new Set([
   "ERROR",
   "CANCELADO",
 ]);
-const POLL_INTERVAL_MS = 1200;
+const ACTIVE_POLL_INTERVAL_MS = 2000;
+const IDLE_POLL_INTERVAL_MS = 60000;
+const ERROR_POLL_INTERVAL_MS = 15000;
+
 let pollTimer = null;
 let polling = false;
+let hasActiveJobs = false;
 
 function prepareFormRequest(form) {
   const method = String(form.method || "POST").toUpperCase();
@@ -90,7 +94,7 @@ function recentRow(job) {
 function renderJobs(payload) {
   const activeContainer = query("#liveActiveJobs");
   const recentBody = query("#liveRecentJobs");
-  if (!activeContainer || !recentBody) return;
+  if (!activeContainer || !recentBody) return 0;
 
   const active = Array.isArray(payload?.activos) ? payload.activos : [];
   const recent = Array.isArray(payload?.recientes) ? payload.recientes : [];
@@ -112,30 +116,57 @@ function renderJobs(payload) {
   if (liveStatus) {
     liveStatus.textContent = active.length ? `En vivo · ${active.length} activo${active.length === 1 ? "" : "s"}` : "En vivo · cola libre";
   }
+
+  return active.length;
 }
 
-async function refreshJobs({ silent = true } = {}) {
-  if (polling) return;
+function clearPollTimer() {
+  if (pollTimer !== null) {
+    window.clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function scheduleNextPoll(delayMs) {
+  clearPollTimer();
+  if (document.hidden || !query("#liveActiveJobs")) return;
+  pollTimer = window.setTimeout(() => {
+    refreshJobs();
+  }, delayMs);
+}
+
+async function refreshJobs({ silent = true, scheduleNext = true } = {}) {
+  if (polling || document.hidden) return;
   polling = true;
+  let nextDelay = hasActiveJobs ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
+
   try {
     const payload = await request("/admin/panel/jobs");
-    renderJobs(payload);
+    hasActiveJobs = renderJobs(payload) > 0;
+    nextDelay = hasActiveJobs ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
   } catch (error) {
     const liveStatus = query("#jobsLiveStatus");
     if (liveStatus) liveStatus.textContent = "Sin conexión de seguimiento";
+    nextDelay = ERROR_POLL_INTERVAL_MS;
     if (!silent) toast(errorMessage(error), "error", 7000);
   } finally {
     polling = false;
+    if (scheduleNext) scheduleNextPoll(nextDelay);
   }
 }
 
 function schedulePolling() {
   if (!query("#liveActiveJobs")) return;
-  window.clearInterval(pollTimer);
+
+  clearPollTimer();
   refreshJobs();
-  pollTimer = window.setInterval(() => refreshJobs(), POLL_INTERVAL_MS);
+
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) refreshJobs();
+    if (document.hidden) {
+      clearPollTimer();
+      return;
+    }
+    refreshJobs();
   });
 }
 
@@ -174,7 +205,7 @@ function initializeJobCancellation(root = document) {
       try {
         await request(`/admin/panel/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
         toast("Cancelación solicitada.", "success");
-        await refreshJobs();
+        await refreshJobs({ scheduleNext: true });
       } catch (error) {
         toast(errorMessage(error), "error", 7000);
         setButtonBusy(button, false);
@@ -188,7 +219,8 @@ function initializeManualRefresh() {
   if (!button) return;
   button.addEventListener("click", async () => {
     setButtonBusy(button, true, "Actualizando…");
-    await refreshJobs({ silent: false });
+    clearPollTimer();
+    await refreshJobs({ silent: false, scheduleNext: true });
     setButtonBusy(button, false);
   });
 }
