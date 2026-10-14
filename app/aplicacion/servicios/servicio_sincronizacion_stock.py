@@ -114,7 +114,7 @@ class StockSyncService:
                 f"mapeos_obsoletos={resumen['mapeos_obsoletos']} "
                 f"errores={resumen['errores']} dry_run={self.settings.dry_run}"
             ),
-            metodo_gbp=f"wsExportDataById({exportacion})",
+            metodo_gbp=f"wsExportDataById({self.settings.gbp_export_productos_stock_id})",
             duracion_ms=int(resumen["duration_ms"]),
         )
         return normalizar_objeto_gbp(resumen)
