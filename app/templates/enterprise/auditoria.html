@@ -1,5 +1,10 @@
-{% extends "enterprise/base.html" %}{% block content %}
-<section class="hero"><div><span class="eyebrow">TRAZABILIDAD</span><h2>Registro de operaciones del integrador</h2><p>Seguimiento de decisiones, sincronizaciones, errores y acciones manuales.</p></div></section>
-<section class="card"><div class="card-head"><div><span class="eyebrow">ÚLTIMO EVENTO</span><h3>Actividad registrada</h3></div></div>{% if ultimo_evento %}<div class="detail-grid">{% for clave, valor in ultimo_evento.items() %}<div><span>{{ clave|replace('_',' ')|title }}</span><strong>{{ valor }}</strong></div>{% endfor %}</div>{% else %}<div class="empty"><strong>No hay eventos de auditoría</strong></div>{% endif %}</section>
-<section class="card"><div class="callout"><strong>Auditoría técnica disponible por API</strong><p>La interfaz utiliza los repositorios de trazabilidad existentes. Los detalles de diagnóstico permanecen disponibles en los endpoints administrativos y en los logs estructurados.</p></div><a class="btn" href="/docs">Abrir documentación API</a></section>
+{% extends "enterprise/base.html" %}
+{% block content %}
+<div class="section-intro"><div><span class="eyebrow">TRAZABILIDAD</span><h2>Historial de acciones registradas</h2><p>Consultá los últimos 50 eventos persistidos de sincronización y auditoría. Los registros se muestran por ID descendente y no se editan desde esta vista.</p></div><div class="intro-actions"><a class="btn" href="/admin/panel/trabajos">Ver trabajos</a><a class="btn" href="/docs">API de diagnóstico ↗</a></div></div>
+<section class="card table-card" aria-labelledby="auditLogTitle">
+  <div class="history-header"><span class="eyebrow">EVENTOS PERSISTIDOS</span><h3 id="auditLogTitle">Registro reciente</h3><p class="card-subtitle">La vista permite inspeccionar el historial. No sustituye la conservación y exportación completa de logs.</p></div>
+  <div class="table-wrap"><table class="audit-table"><thead><tr><th scope="col">Fecha UTC</th><th scope="col">Acción</th><th scope="col">SKU</th><th scope="col">Estado</th><th scope="col">Duración</th><th scope="col">Detalle</th></tr></thead>
+  <tbody>{% for evento in eventos %}<tr><td>{{ evento.created_at or '—' }}</td><td><strong>{{ evento.accion }}</strong>{% if evento.metodo_gbp %}<small class="block">{{ evento.metodo_gbp }}</small>{% endif %}</td><td>{{ evento.sku or '—' }}</td><td><span class="badge {% if evento.estado|upper in ['OK','EXITO','SUCCESS','COMPLETADO'] %}success{% elif evento.estado|upper in ['ERROR','FAILED','FALLO'] %}danger{% else %}neutral{% endif %}">{{ evento.estado }}</span></td><td>{% if evento.duracion_ms is not none %}{{ evento.duracion_ms }} ms{% else %}—{% endif %}</td><td class="audit-message">{{ evento.mensaje }}</td></tr>
+  {% else %}<tr><td colspan="6"><div class="empty"><strong>No hay eventos registrados</strong><p>Las nuevas operaciones auditadas aparecerán aquí.</p></div></td></tr>{% endfor %}</tbody></table></div>
+</section>
 {% endblock %}

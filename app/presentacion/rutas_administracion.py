@@ -1,20 +1,8 @@
 import logging
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query
+from fastapi import APIRouter, Depends, Form, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from app.aplicacion.trabajos.trabajos_masivos import (
-    ejecutar_job_auditar_proximos,
-    ejecutar_job_auditar_todo,
-    ejecutar_job_importar_pendientes,
-    ejecutar_job_importar_sku,
-    ejecutar_job_importar_todo,
-    ejecutar_job_normalizar_categorias,
-    ejecutar_job_reauditar_decision,
-    ejecutar_job_reconciliar_tienda_nube,
-    ejecutar_job_stock_lote,
-    ejecutar_job_stock_sku,
-)
 from app.aplicacion.servicios.servicio_importacion_tienda_nube import (
     TiendaNubeImportService,
 )
@@ -399,7 +387,6 @@ def listar_depositos(db: Session = Depends(obtener_sesion_bd)) -> dict[str, obje
 
 @router.post("/panel/jobs/auditar-todo")
 async def panel_iniciar_job_auditar_todo(
-    background_tasks: BackgroundTasks,
     batch_limit: int = Query(default=200, ge=1, le=1000),
     concurrency: int = Query(default=3, ge=1, le=10),
     db: Session = Depends(obtener_sesion_bd),
@@ -414,13 +401,10 @@ async def panel_iniciar_job_auditar_todo(
             "concurrency": concurrency,
             "porcentaje": 0,
         },
+    
+        payload={'batch_limit': batch_limit, 'concurrency': concurrency},
     )
-    background_tasks.add_task(
-        ejecutar_job_auditar_todo,
-        job_id=job.id,
-        batch_limit=batch_limit,
-        concurrency=concurrency,
-    )
+    
     return JSONResponse(
         {
             "ok": True,
@@ -433,7 +417,6 @@ async def panel_iniciar_job_auditar_todo(
 
 @router.post("/panel/jobs/importar-todo")
 async def panel_iniciar_job_importar_todo(
-    background_tasks: BackgroundTasks,
     batch_limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(obtener_sesion_bd),
 ) -> JSONResponse:
@@ -448,12 +431,10 @@ async def panel_iniciar_job_importar_todo(
             "dry_run": settings.dry_run,
             "porcentaje": 0,
         },
+    
+        payload={'batch_limit': batch_limit},
     )
-    background_tasks.add_task(
-        ejecutar_job_importar_todo,
-        job_id=job.id,
-        batch_limit=batch_limit,
-    )
+    
     return JSONResponse(
         {
             "ok": True,
@@ -511,7 +492,6 @@ def panel_cancelar_job(
 
 @router.post("/panel/importar-sku")
 async def panel_importar_sku_directo(
-    background_tasks: BackgroundTasks,
     sku: str = Form(..., min_length=1),
     forzar: bool = Form(default=False),
     db: Session = Depends(obtener_sesion_bd),
@@ -527,10 +507,10 @@ async def panel_importar_sku_directo(
             "sku": clean_sku,
             "porcentaje": 0,
         },
+    
+        payload={'sku': clean_sku, 'forzar': forzar},
     )
-    background_tasks.add_task(
-        ejecutar_job_importar_sku, job_id=job.id, sku=clean_sku, forzar=forzar
-    )
+    
     return JSONResponse(
         {
             "ok": True,
@@ -543,7 +523,6 @@ async def panel_importar_sku_directo(
 
 @router.post("/panel/auditar-proximos")
 async def panel_auditar_proximos_productos(
-    background_tasks: BackgroundTasks,
     batch_limit: int = Query(default=200, ge=1, le=1000),
     concurrency: int = Query(default=3, ge=1, le=10),
     db: Session = Depends(obtener_sesion_bd),
@@ -557,13 +536,10 @@ async def panel_auditar_proximos_productos(
             "batch_limit": batch_limit,
             "porcentaje": 0,
         },
+    
+        payload={'batch_limit': batch_limit, 'concurrency': concurrency},
     )
-    background_tasks.add_task(
-        ejecutar_job_auditar_proximos,
-        job_id=job.id,
-        batch_limit=batch_limit,
-        concurrency=concurrency,
-    )
+    
     return JSONResponse(
         {
             "ok": True,
@@ -576,7 +552,6 @@ async def panel_auditar_proximos_productos(
 
 @router.post("/panel/importar-pendientes")
 async def panel_importar_pendientes_tienda_nube(
-    background_tasks: BackgroundTasks,
     batch_limit: int = Query(default=25, ge=1, le=200),
     db: Session = Depends(obtener_sesion_bd),
 ) -> JSONResponse:
@@ -589,10 +564,10 @@ async def panel_importar_pendientes_tienda_nube(
             "batch_limit": batch_limit,
             "porcentaje": 0,
         },
+    
+        payload={'batch_limit': batch_limit},
     )
-    background_tasks.add_task(
-        ejecutar_job_importar_pendientes, job_id=job.id, batch_limit=batch_limit
-    )
+    
     return JSONResponse(
         {
             "ok": True,
@@ -605,7 +580,6 @@ async def panel_importar_pendientes_tienda_nube(
 
 @router.post("/panel/stock/run-now")
 async def panel_stock_run_now(
-    background_tasks: BackgroundTasks,
     batch_limit: int = Query(default=100, ge=1, le=1000),
     db: Session = Depends(obtener_sesion_bd),
 ) -> JSONResponse:
@@ -618,10 +592,10 @@ async def panel_stock_run_now(
             "batch_limit": batch_limit,
             "porcentaje": 0,
         },
+    
+        payload={'batch_limit': batch_limit},
     )
-    background_tasks.add_task(
-        ejecutar_job_stock_lote, job_id=job.id, batch_limit=batch_limit
-    )
+    
     return JSONResponse(
         {
             "ok": True,
@@ -634,7 +608,6 @@ async def panel_stock_run_now(
 
 @router.post("/panel/stock/run-sku")
 async def panel_stock_run_sku(
-    background_tasks: BackgroundTasks,
     sku: str = Form(..., min_length=1),
     db: Session = Depends(obtener_sesion_bd),
 ) -> JSONResponse:
@@ -649,8 +622,10 @@ async def panel_stock_run_sku(
             "sku": clean_sku,
             "porcentaje": 0,
         },
+    
+        payload={'sku': clean_sku},
     )
-    background_tasks.add_task(ejecutar_job_stock_sku, job_id=job.id, sku=clean_sku)
+    
     return JSONResponse(
         {
             "ok": True,
@@ -663,7 +638,6 @@ async def panel_stock_run_sku(
 
 @router.post("/panel/mapeos/reconciliar-tn")
 async def panel_reconciliar_mapeos_tienda_nube(
-    background_tasks: BackgroundTasks,
     limit: int = Query(default=500, ge=1, le=1000),
     db: Session = Depends(obtener_sesion_bd),
 ) -> JSONResponse:
@@ -676,10 +650,10 @@ async def panel_reconciliar_mapeos_tienda_nube(
             "limit": limit,
             "porcentaje": 0,
         },
+    
+        payload={'limit': limit},
     )
-    background_tasks.add_task(
-        ejecutar_job_reconciliar_tienda_nube, job_id=job.id, limit=limit
-    )
+    
     return JSONResponse(
         {
             "ok": True,
@@ -747,7 +721,6 @@ def eliminar_normalizacion_categoria(
 
 @router.post("/panel/categorias/normalizar-duplicadas")
 async def panel_normalizar_categorias_duplicadas(
-    background_tasks: BackgroundTasks,
     confirm: bool = Query(default=True),
     db: Session = Depends(obtener_sesion_bd),
 ) -> JSONResponse:
@@ -756,10 +729,10 @@ async def panel_normalizar_categorias_duplicadas(
     job = RepositorioTrabajosSincronizacion(db).crear(
         tipo="NORMALIZAR_CATEGORIAS_TN",
         progreso={"mensaje": "Job creado para normalizar categorías.", "porcentaje": 0},
+    
+        payload={'confirm': confirm},
     )
-    background_tasks.add_task(
-        ejecutar_job_normalizar_categorias, job_id=job.id, confirm=confirm
-    )
+    
     return JSONResponse(
         {
             "ok": True,
@@ -772,7 +745,6 @@ async def panel_normalizar_categorias_duplicadas(
 
 @router.post("/panel/auditar-bloqueados")
 async def panel_auditar_bloqueados_por_decision(
-    background_tasks: BackgroundTasks,
     decision: str = Query(default="NO_PUBLICAR_SIN_DESCRIPCION_WEB"),
     batch_limit: int = Query(default=200, ge=1, le=1000),
     db: Session = Depends(obtener_sesion_bd),
@@ -787,13 +759,10 @@ async def panel_auditar_bloqueados_por_decision(
             "batch_limit": batch_limit,
             "porcentaje": 0,
         },
+    
+        payload={'decision': decision, 'batch_limit': batch_limit},
     )
-    background_tasks.add_task(
-        ejecutar_job_reauditar_decision,
-        job_id=job.id,
-        decision=decision,
-        batch_limit=batch_limit,
-    )
+    
     return JSONResponse(
         {
             "ok": True,
@@ -806,7 +775,6 @@ async def panel_auditar_bloqueados_por_decision(
 
 @router.post("/panel/auditar-bloqueados-sin-descripcion")
 async def panel_auditar_bloqueados_sin_descripcion(
-    background_tasks: BackgroundTasks,
     batch_limit: int = Query(default=200, ge=1, le=1000),
     db: Session = Depends(obtener_sesion_bd),
 ) -> JSONResponse:
@@ -820,13 +788,10 @@ async def panel_auditar_bloqueados_sin_descripcion(
             "batch_limit": batch_limit,
             "porcentaje": 0,
         },
+    
+        payload={'decision': "NO_PUBLICAR_SIN_DESCRIPCION_WEB", 'batch_limit': batch_limit},
     )
-    background_tasks.add_task(
-        ejecutar_job_reauditar_decision,
-        job_id=job.id,
-        decision="NO_PUBLICAR_SIN_DESCRIPCION_WEB",
-        batch_limit=batch_limit,
-    )
+    
     return JSONResponse(
         {
             "ok": True,

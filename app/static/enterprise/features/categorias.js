@@ -67,7 +67,7 @@ function initializeDedupeActions() {
         const result = await request(`/admin/panel/categorias/normalizar-duplicadas?confirm=${confirmWrite}`, { method: "POST" });
         if (result?.ok === false) throw new Error(result?.detalle || "No se pudo iniciar el trabajo.");
         toast(result?.job_id ? `Trabajo iniciado #${result.job_id}.` : "Trabajo iniciado.", "success");
-        window.setTimeout(() => window.location.assign("/admin/panel/trabajos"), 600);
+        window.setTimeout(() => window.location.assign(result?.job_id ? `/admin/panel/trabajos?focus=${encodeURIComponent(result.job_id)}` : "/admin/panel/trabajos"), 600);
       } catch (error) {
         toast(errorMessage(error), "error", 7000);
         setButtonBusy(button, false);

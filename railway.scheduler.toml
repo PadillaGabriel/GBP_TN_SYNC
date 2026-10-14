@@ -1,0 +1,7 @@
+# Railway: servicio privado, una sola réplica; la unicidad del job se coordina en PostgreSQL.
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "python -m app.procesos.programador"
+restartPolicyType = "ON_FAILURE"

@@ -3,40 +3,55 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{{ titulo }} · Integrador</title>
+  <meta name="theme-color" content="#101d31">
+  <meta name="description" content="Panel operativo del integrador Global Blue Point y Tiendanube">
+  <title>{{ titulo }} · Silmar Integrador</title>
   <link rel="icon" href="/static/enterprise/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/enterprise/app.css">
   <script type="module" src="/static/enterprise/app.js"></script>
 </head>
 <body data-section="{{ seccion }}">
+<a class="skip-link" href="#mainContent">Saltar al contenido principal</a>
 <div class="app-shell">
-  <aside class="sidebar" id="sidebar">
-    <a class="brand" href="/admin/panel"><span class="brand-mark">SI</span><span><strong>Silmar Integrador</strong><small>Control Center</small></span></a>
-    <nav class="nav">
-      <p class="nav-label">OPERACIÓN</p>
-      <a href="/admin/panel" data-nav="inicio"><span>⌂</span>Inicio</a>
-      <a href="/admin/panel/productos" data-nav="productos"><span>▦</span>Productos</a>
-      <a href="/admin/panel/categorias" data-nav="categorias"><span>⌘</span>Categorías</a>
-      <a href="/admin/panel/importaciones" data-nav="importaciones"><span>⇩</span>Importaciones</a>
-      <a href="/admin/panel/sincronizacion" data-nav="sincronizacion"><span>↻</span>Sincronización</a>
-      <a href="/admin/panel/pedidos" data-nav="pedidos"><span>▤</span>Pedidos</a>
-      <p class="nav-label">PLATAFORMA</p>
-      <a href="/admin/panel/exportaciones" data-nav="exportaciones"><span>⇄</span>Exportaciones GBP</a>
-      <a href="/admin/panel/trabajos" data-nav="trabajos"><span>◷</span>Trabajos</a>
-      <a href="/admin/panel/auditoria" data-nav="auditoria"><span>◎</span>Auditoría</a>
-      <a href="/admin/panel/configuracion" data-nav="configuracion"><span>⚙</span>Configuración</a>
+  <aside class="sidebar" id="sidebar" aria-label="Navegación principal">
+    <a class="brand" href="/admin/panel" aria-label="Silmar Integrador, inicio">
+      <span class="brand-mark" aria-hidden="true">S<span class="brand-mark-accent">/</span>I</span>
+      <span><strong>Silmar Integrador</strong><small>Centro de operaciones</small></span>
+    </a>
+    <nav class="nav" aria-label="Secciones del integrador">
+      <p class="nav-label">GESTIÓN</p>
+      <a href="/admin/panel" data-nav="inicio"><span class="nav-icon" aria-hidden="true">⌂</span><span>Resumen</span></a>
+      <a href="/admin/panel/productos" data-nav="productos"><span class="nav-icon" aria-hidden="true">▦</span><span>Productos</span></a>
+      <a href="/admin/panel/categorias" data-nav="categorias"><span class="nav-icon" aria-hidden="true">◇</span><span>Categorías</span></a>
+      <a href="/admin/panel/importaciones" data-nav="importaciones"><span class="nav-icon" aria-hidden="true">↧</span><span>Importaciones</span></a>
+      <a href="/admin/panel/sincronizacion" data-nav="sincronizacion"><span class="nav-icon" aria-hidden="true">↻</span><span>Sincronización</span></a>
+      <a href="/admin/panel/pedidos" data-nav="pedidos"><span class="nav-icon" aria-hidden="true">≡</span><span>Pedidos</span></a>
+      <p class="nav-label">MONITOREO Y SISTEMA</p>
+      <a href="/admin/panel/trabajos" data-nav="trabajos"><span class="nav-icon" aria-hidden="true">◷</span><span>Trabajos</span></a>
+      <a href="/admin/panel/auditoria" data-nav="auditoria"><span class="nav-icon" aria-hidden="true">◎</span><span>Auditoría</span></a>
+      <a href="/admin/panel/exportaciones" data-nav="exportaciones"><span class="nav-icon" aria-hidden="true">⇄</span><span>Exportaciones GBP</span></a>
+      <a href="/admin/panel/configuracion" data-nav="configuracion"><span class="nav-icon" aria-hidden="true">⚙</span><span>Configuración</span></a>
     </nav>
-    <div class="sidebar-footer"><span class="status-dot"></span><div><strong>{{ entorno|upper }}</strong><small>{% if dry_run %}Modo simulación{% else %}Escritura habilitada{% endif %}</small></div></div>
+    <div class="sidebar-footer">
+      <span class="status-dot {% if dry_run %}warning{% endif %}" aria-hidden="true"></span>
+      <div><strong>{{ entorno|upper }}</strong><small>{% if dry_run %}Simulación: sin escrituras{% else %}Modo de escritura habilitado{% endif %}</small></div>
+    </div>
   </aside>
-  <section class="workspace">
+  <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
+  <div class="workspace">
     <header class="topbar">
-      <button class="icon-btn menu-btn" id="menuBtn" aria-label="Abrir menú">☰</button>
-      <div><span class="eyebrow">INTEGRADOR EMPRESARIAL</span><h1>{{ titulo }}</h1></div>
-      <div class="top-actions"><span class="env-pill {% if dry_run %}warning{% else %}success{% endif %}">{% if dry_run %}DRY RUN{% else %}OPERATIVO{% endif %}</span><a class="icon-btn" href="/docs" title="API">API</a></div>
+      <button class="icon-btn menu-btn" id="menuBtn" type="button" aria-label="Abrir navegación" aria-controls="sidebar" aria-expanded="false">☰</button>
+      <div class="page-heading"><span class="eyebrow">GLOBAL BLUE POINT <span aria-hidden="true">/</span> TIENDANUBE</span><h1>{{ titulo }}</h1></div>
+      <div class="top-actions">
+        <span class="env-pill {% if dry_run %}warning{% else %}success{% endif %}" title="Indica el modo configurado, no el estado de salud de los servicios">{% if dry_run %}SIMULACIÓN{% else %}ESCRITURA HABILITADA{% endif %}</span>
+        <button class="icon-btn theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema" title="Cambiar tema"><span aria-hidden="true">◐</span></button>
+        <a class="icon-btn api-link" href="/docs" title="Documentación de la API">API <span aria-hidden="true">↗</span></a>
+      </div>
     </header>
-    <main class="content">{% block content %}{% endblock %}</main>
-  </section>
+    <main class="content" id="mainContent" tabindex="-1">{% block content %}{% endblock %}</main>
+    <footer class="workspace-footer"><span>Silmar Integrador · GBP ↔ Tiendanube</span><span>Los estados reflejan los datos registrados; verificá las operaciones externas antes de reintentar.</span></footer>
+  </div>
 </div>
-<div class="toast-stack" id="toastStack"></div>
+<div class="toast-stack" id="toastStack" aria-label="Notificaciones"></div>
 </body>
 </html>

@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
+from app.seguridad.administracion import verificar_admin
 
 from app.presentacion.rutas_administracion import router as admin_router
 from app.presentacion.rutas_salud import router as health_router
@@ -9,8 +10,6 @@ from app.presentacion.rutas_medios import router as media_router
 from app.presentacion.rutas_sincronizacion import router as sync_router
 from app.presentacion.rutas_pedidos import router as pedidos_router
 from app.presentacion.rutas_panel import router as panel_router
-from app.infraestructura.persistencia.base_datos import create_database_schema
-from app.procesos.programador import IntegradorScheduler
 from app.observabilidad.registro import configure_logging
 from app.configuracion import obtener_configuracion
 
@@ -21,9 +20,6 @@ async def lifespan(app: FastAPI):
 
     settings = obtener_configuracion()
     configure_logging(settings.log_level)
-    create_database_schema()
-    scheduler = IntegradorScheduler()
-    scheduler.start()
     yield
 
 
@@ -36,6 +32,13 @@ def create_app() -> FastAPI:
         debug=settings.app_debug,
         lifespan=lifespan,
     )
+    @app.middleware("http")
+    async def proteger_admin(request: Request, call_next):
+        rechazo = verificar_admin(request, settings)
+        if rechazo is not None:
+            return rechazo
+        return await call_next(request)
+
     app.mount("/static", StaticFiles(directory="app/static"), name="static")
     app.include_router(health_router)
     app.include_router(sync_router)

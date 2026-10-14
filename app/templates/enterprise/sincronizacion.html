@@ -1,7 +1,7 @@
 {% extends "enterprise/base.html" %}
 {% block content %}
 <div class="metric-grid">
-  <article class="metric"><span>Programador</span><strong>{% if settings.stock_scheduler_enabled %}Activo{% else %}Pausado{% endif %}</strong><small>Cada {{ settings.stock_sync_interval_minutes }} min</small></article>
+  <article class="metric"><span>Programación configurada</span><strong>{% if settings.stock_scheduler_enabled %}Habilitada{% else %}Deshabilitada{% endif %}</strong><small>Intervalo: {{ settings.stock_sync_interval_minutes }} min · No confirma ejecución del scheduler</small></article>
   <article class="metric"><span>Última sincronización</span><strong>{{ stock_sync.ultima_sync_stock or 'Sin datos' }}</strong><small>Marca de tiempo registrada</small></article>
   <article class="metric"><span>Con stock sincronizado</span><strong>{{ stock_sync.productos_con_stock_sync or 0 }}</strong><small>Mapeos procesados al menos una vez</small></article>
   <article class="metric"><span>Pendientes</span><strong>{{ stock_sync.productos_pendientes_stock_sync or 0 }}</strong><small>Mapeos activos sin ciclo registrado</small></article>
@@ -32,6 +32,6 @@
 </section>
 <section class="card">
   <div class="card-head"><div><span class="eyebrow">MONITOREO</span><h3>Ejecuciones recientes</h3></div><a href="/admin/panel/trabajos">Centro de trabajos</a></div>
-  <div class="job-list">{% for job in jobs_recientes %}<a class="job-row" href="/admin/panel/trabajos"><span class="job-icon">↻</span><div><strong>{{ job.tipo or job.nombre or 'Trabajo' }}</strong><small>#{{ job.id }} · {{ job.estado }}</small></div><div class="progress"><i style="width:{{ job.progreso_porcentaje or 0 }}%"></i></div><b>{{ job.progreso_porcentaje or 0 }}%</b></a>{% else %}<div class="empty"><strong>Sin ejecuciones registradas</strong></div>{% endfor %}</div>
+  <div class="job-list">{% for job in jobs_recientes %}<a class="job-row" href="/admin/panel/trabajos?focus={{ job.id }}"><span class="job-icon">↻</span><div><strong>{{ job.tipo or job.nombre or 'Trabajo' }}</strong><small>#{{ job.id }} · {{ job.estado }}</small></div><div class="progress"><i style="width:{{ job.progreso_porcentaje or 0 }}%"></i></div><b>{{ job.progreso_porcentaje or 0 }}%</b></a>{% else %}<div class="empty"><strong>Sin ejecuciones registradas</strong></div>{% endfor %}</div>
 </section>
 {% endblock %}

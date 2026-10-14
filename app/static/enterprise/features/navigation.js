@@ -10,29 +10,66 @@ export function initializeNavigation() {
 
   const sidebar = query("#sidebar");
   const button = query("#menuBtn");
-  if (!sidebar || !button) return;
-
+  const backdrop = query("#sidebarBackdrop");
+  if (!sidebar || !button || !backdrop) return;
+  let previousFocus = null;
+  const isMobile = () => window.matchMedia("(max-width: 960px)").matches;
   const close = () => {
+    const wasOpen = sidebar.classList.contains("open");
     sidebar.classList.remove("open");
+    backdrop.hidden = true;
     button.setAttribute("aria-expanded", "false");
+    button.setAttribute("aria-label", "Abrir navegación");
+    document.body.classList.remove("nav-open");
+    if (wasOpen && isMobile()) (previousFocus || button).focus();
+  };
+  const open = () => {
+    previousFocus = document.activeElement;
+    sidebar.classList.add("open");
+    backdrop.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    button.setAttribute("aria-label", "Cerrar navegación");
+    document.body.classList.add("nav-open");
+    sidebar.querySelector("a")?.focus();
   };
 
-  button.addEventListener("click", () => {
-    const open = sidebar.classList.toggle("open");
-    button.setAttribute("aria-expanded", String(open));
-  });
+  button.addEventListener("click", () => sidebar.classList.contains("open") ? close() : open());
+  backdrop.addEventListener("click", close);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") close();
-  });
-  document.addEventListener("click", (event) => {
-    const mobile = window.matchMedia("(max-width: 960px)").matches;
-    if (
-      mobile &&
-      sidebar.classList.contains("open") &&
-      !sidebar.contains(event.target) &&
-      !button.contains(event.target)
-    ) {
-      close();
+    if (event.key === "Tab" && isMobile() && sidebar.classList.contains("open")) {
+      const elements = [...sidebar.querySelectorAll("a[href]")];
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     }
   });
+  window.matchMedia("(max-width: 960px)").addEventListener("change", (event) => {
+    if (!event.matches) close();
+  });
+  sidebar.querySelectorAll("a[href]").forEach((link) => link.addEventListener("click", close));
+}
+
+export function initializeTheme() {
+  const button = query("#themeToggle");
+  if (!button) return;
+  const key = "silmar-panel-theme";
+  let preferred = "auto";
+  try { preferred = localStorage.getItem(key) || "auto"; } catch { /* Storage may be unavailable. */ }
+  const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+  const apply = () => {
+    const dark = preferred === "dark" || (preferred === "auto" && systemDark.matches);
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+    button.setAttribute("aria-label", dark ? "Activar tema claro" : "Activar tema oscuro");
+    button.title = dark ? "Tema claro" : "Tema oscuro";
+    button.querySelector("span").textContent = dark ? "☀" : "◐";
+  };
+  button.addEventListener("click", () => {
+    preferred = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    try { localStorage.setItem(key, preferred); } catch { /* Non-persistent mode. */ }
+    apply();
+  });
+  systemDark.addEventListener("change", () => { if (preferred === "auto") apply(); });
+  apply();
 }

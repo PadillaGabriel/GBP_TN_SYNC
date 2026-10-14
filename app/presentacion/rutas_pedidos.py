@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -37,7 +37,6 @@ from app.aplicacion.pedidos.casos_uso import (
 )
 from app.configuracion import obtener_configuracion
 from app.dependencias import (
-    construir_procesador_pedido_tienda_nube,
     obtener_cliente_tienda_nube,
     obtener_cliente_gbp_pedidos,
     obtener_cliente_gbp,
@@ -50,8 +49,8 @@ from app.dominio.pedidos import (
     ItemPedidoExterno,
     PedidoExterno,
 )
-from app.infraestructura.persistencia.base_datos import SessionLocal
 from app.infraestructura.persistencia.repositorios.pedidos import RepositorioPedidos
+from app.infraestructura.persistencia.repositorios.trabajos_sincronizacion import RepositorioTrabajosSincronizacion
 from app.infraestructura.tienda_nube.webhooks import (
     FirmaWebhookTiendaNubeInvalidaError,
     verificar_firma_webhook,
@@ -110,13 +109,6 @@ class WebhookTiendaNubeEntrada(BaseModel):
     id: str | int
 
 
-async def _procesar_pedido_tienda_nube_en_segundo_plano(order_id: str) -> None:
-    """Ejecuta el flujo completo con una sesión independiente de la solicitud."""
-
-    with SessionLocal() as sesion:
-        procesador = construir_procesador_pedido_tienda_nube(sesion)
-        await procesador.ejecutar(order_id)
-
 
 @router.post(
     "/webhooks/tienda-nube",
@@ -124,7 +116,7 @@ async def _procesar_pedido_tienda_nube_en_segundo_plano(order_id: str) -> None:
 )
 async def recibir_webhook_tienda_nube(
     request: Request,
-    background_tasks: BackgroundTasks,
+    db: Session = Depends(obtener_sesion_bd),
 ) -> dict[str, object]:
     """Valida y encola eventos de pedidos enviados por Tiendanube."""
 
@@ -169,15 +161,18 @@ async def recibir_webhook_tienda_nube(
             "order_id": str(entrada.id),
         }
 
-    background_tasks.add_task(
-        _procesar_pedido_tienda_nube_en_segundo_plano,
-        str(entrada.id),
+    job = RepositorioTrabajosSincronizacion(db).crear(
+        tipo="PEDIDO_TN_WEBHOOK",
+        idempotency_key=f"tn:{entrada.store_id}:{evento}:{entrada.id}",
+        payload={"order_id": str(entrada.id)},
+        progreso={"mensaje": "Pedido aceptado. Esperando worker.", "porcentaje": 0},
     )
     return {
         "ok": True,
         "aceptado": True,
         "evento": evento,
         "order_id": str(entrada.id),
+        "job_id": job.id,
     }
 
 

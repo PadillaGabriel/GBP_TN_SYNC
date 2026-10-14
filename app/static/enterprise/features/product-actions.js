@@ -21,7 +21,7 @@ async function runFormJob(url, fields, button) {
     const result = await request(url, { method: "POST", body });
     if (result?.ok === false) throw new Error(result.error || result.detalle || "No se pudo iniciar.");
     toast(result?.job_id ? `Trabajo iniciado #${result.job_id}.` : "Trabajo iniciado.", "success");
-    window.setTimeout(() => window.location.assign("/admin/panel/trabajos"), 650);
+    window.setTimeout(() => window.location.assign(result?.job_id ? `/admin/panel/trabajos?focus=${encodeURIComponent(result.job_id)}` : "/admin/panel/trabajos"), 650);
   } catch (error) {
     toast(errorMessage(error), "error", 7000);
     setButtonBusy(button, false);

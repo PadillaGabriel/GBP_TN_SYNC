@@ -1,12 +1,8 @@
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.aplicacion.trabajos.trabajos_masivos import (
-    ejecutar_job_auditar_todo,
-    ejecutar_job_importar_todo,
-)
 from app.aplicacion.servicios.servicio_auditoria_gbp import GBPAuditService
 from app.aplicacion.servicios.servicio_importacion_tienda_nube import (
     TiendaNubeImportService,
@@ -24,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 @router.post("/jobs/audit-all")
 async def iniciar_job_auditar_todo(
-    background_tasks: BackgroundTasks,
     batch_limit: int = Query(default=200, ge=1, le=1000),
     concurrency: int = Query(default=3, ge=1, le=10),
     db: Session = Depends(obtener_sesion_bd),
@@ -39,13 +34,10 @@ async def iniciar_job_auditar_todo(
             "concurrency": concurrency,
             "porcentaje": 0,
         },
+    
+        payload={'batch_limit': batch_limit, 'concurrency': concurrency},
     )
-    background_tasks.add_task(
-        ejecutar_job_auditar_todo,
-        job_id=job.id,
-        batch_limit=batch_limit,
-        concurrency=concurrency,
-    )
+    
     return {
         "ok": True,
         "job_id": job.id,
@@ -57,7 +49,6 @@ async def iniciar_job_auditar_todo(
 
 @router.post("/jobs/import-all")
 async def iniciar_job_importar_todo(
-    background_tasks: BackgroundTasks,
     batch_limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(obtener_sesion_bd),
 ) -> dict[str, object]:
@@ -72,12 +63,10 @@ async def iniciar_job_importar_todo(
             "dry_run": settings.dry_run,
             "porcentaje": 0,
         },
+    
+        payload={'batch_limit': batch_limit},
     )
-    background_tasks.add_task(
-        ejecutar_job_importar_todo,
-        job_id=job.id,
-        batch_limit=batch_limit,
-    )
+    
     return {
         "ok": True,
         "job_id": job.id,

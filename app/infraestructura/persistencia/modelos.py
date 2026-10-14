@@ -6,6 +6,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    Index,
     Numeric,
     String,
     Text,
@@ -205,6 +206,10 @@ class SyncJobModel(Base):
     """Cola persistida de trabajos."""
 
     __tablename__ = "sync_jobs"
+    __table_args__ = (
+        Index("uq_sync_jobs_idempotency_key", "idempotency_key", unique=True),
+        Index("ix_sync_jobs_claim", "estado", "prioridad", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tipo: Mapped[str] = mapped_column(String(100), index=True)
@@ -217,6 +222,19 @@ class SyncJobModel(Base):
     intentos: Mapped[int] = mapped_column(Integer, default=0)
     error_codigo: Mapped[str | None] = mapped_column(String(100), nullable=True)
     error_mensaje: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # El texto legado solo se lee como compatibilidad durante la migración.
+    progreso_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_detalle: Mapped[str | None] = mapped_column(Text, nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(240), nullable=True
+    )
+    worker_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

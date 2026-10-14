@@ -11,8 +11,8 @@
 
 <section class="card table-card">
   <div class="table-toolbar">
-    <label class="search"><span>⌕</span><input id="tableSearch" placeholder="Buscar por SKU, título, categoría o decisión"></label>
-    <div class="muted">Mostrando {{ items|length }} registros</div>
+    <label class="search"><span>⌕</span><input id="tableSearch" type="search" aria-label="Buscar entre los productos de esta página" placeholder="Buscar en los registros visibles"></label>
+    <div class="muted" id="productSearchCount" role="status" aria-live="polite">{{ items|length }} registros cargados · Búsqueda solo en esta página</div>
   </div>
   <div class="table-wrap product-table-wrap">
     <table class="product-table">
@@ -21,7 +21,7 @@
       {% for item in items %}
         {% set linked = item.ya_importado_tienda_nube or (item.tn_product_id and item.estado_publicacion not in ['eliminado_tn','eliminado_externo','vinculacion_obsoleta']) %}
         {% set blocked = item.decision not in ['PUBLICABLE_AUTOMATICO','PUBLICABLE_CONSULTAR_PRECIO'] %}
-        <tr>
+        <tr data-product-row>
           <td>
             <div class="product-cell">
               <div class="thumb">{{ (item.sku or '?')[:2] }}</div>
@@ -78,12 +78,13 @@
       {% else %}
         <tr><td colspan="7"><div class="empty"><strong>No hay productos para esta vista</strong><p>Cambiá el filtro o ejecutá una auditoría.</p></div></td></tr>
       {% endfor %}
+        <tr id="productSearchEmpty" hidden><td colspan="7"><div class="empty"><strong>Sin coincidencias en esta página</strong><p>Cambiá el texto o recorré otras páginas.</p></div></td></tr>
       </tbody>
     </table>
   </div>
   <div class="pagination">
     <a class="btn {% if offset == 0 %}disabled{% endif %}" href="?vista={{ vista }}&limit={{ limit }}&offset={{ prev_offset }}" {% if offset == 0 %}aria-disabled="true" tabindex="-1"{% endif %}>Anterior</a>
-    <span>Registros {{ offset + 1 }}–{{ offset + items|length }}</span>
+    <span>{% if items %}Registros {{ offset + 1 }}–{{ offset + items|length }}{% else %}Sin registros en esta página{% endif %}</span>
     <a class="btn {% if items|length < limit %}disabled{% endif %}" href="?vista={{ vista }}&limit={{ limit }}&offset={{ next_offset }}" {% if items|length < limit %}aria-disabled="true" tabindex="-1"{% endif %}>Siguiente</a>
   </div>
 </section>

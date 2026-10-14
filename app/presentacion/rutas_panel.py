@@ -52,7 +52,7 @@ def inicio(request: Request, db: Session = Depends(obtener_sesion_bd)) -> HTMLRe
             "ultimo_evento": auditoria.obtener_ultimo_evento(),
         }
     )
-    return templates.TemplateResponse("enterprise/dashboard.html", context)
+    return templates.TemplateResponse(request, "enterprise/dashboard.html", context)
 
 
 @router.get("/productos", response_class=HTMLResponse)
@@ -82,7 +82,7 @@ def productos(
             "resumen": repo.resumen_operativo_panel(),
         }
     )
-    return templates.TemplateResponse("enterprise/productos.html", context)
+    return templates.TemplateResponse(request, "enterprise/productos.html", context)
 
 
 @router.get("/importaciones", response_class=HTMLResponse)
@@ -93,7 +93,7 @@ def importaciones(
     repo = RepositorioProductos(db)
     context = _base_context(request, "importaciones", "Importación y publicación")
     context.update({"resumen": repo.resumen_operativo_panel()})
-    return templates.TemplateResponse("enterprise/importaciones.html", context)
+    return templates.TemplateResponse(request, "enterprise/importaciones.html", context)
 
 
 @router.get("/sincronizacion", response_class=HTMLResponse)
@@ -111,7 +111,7 @@ def sincronizacion(
             "jobs_recientes": jobs.listar_recientes(limit=12),
         }
     )
-    return templates.TemplateResponse("enterprise/sincronizacion.html", context)
+    return templates.TemplateResponse(request, "enterprise/sincronizacion.html", context)
 
 
 
@@ -130,7 +130,7 @@ def categorias(
             "total_aliases": repo.contar(),
         }
     )
-    return templates.TemplateResponse("enterprise/categorias.html", context)
+    return templates.TemplateResponse(request, "enterprise/categorias.html", context)
 
 
 @router.get("/categorias/normalizar-duplicadas", include_in_schema=False)
@@ -142,7 +142,7 @@ def categorias_normalizar_duplicadas_get() -> RedirectResponse:
 @router.get("/pedidos", response_class=HTMLResponse)
 def pedidos(request: Request) -> HTMLResponse:
     context = _base_context(request, "pedidos", "Pedidos Tiendanube → GBP")
-    return templates.TemplateResponse("enterprise/pedidos.html", context)
+    return templates.TemplateResponse(request, "enterprise/pedidos.html", context)
 
 
 @router.get("/exportaciones", response_class=HTMLResponse)
@@ -179,7 +179,7 @@ def exportaciones(request: Request) -> HTMLResponse:
             ]
         }
     )
-    return templates.TemplateResponse("enterprise/exportaciones.html", context)
+    return templates.TemplateResponse(request, "enterprise/exportaciones.html", context)
 
 
 @router.get("/trabajos", response_class=HTMLResponse)
@@ -196,7 +196,7 @@ def trabajos(
             "recientes": repo.listar_recientes(limit=100),
         }
     )
-    return templates.TemplateResponse("enterprise/trabajos.html", context)
+    return templates.TemplateResponse(request, "enterprise/trabajos.html", context)
 
 
 @router.get("/auditoria", response_class=HTMLResponse)
@@ -206,8 +206,8 @@ def auditoria(
 ) -> HTMLResponse:
     repo = RepositorioAuditoriaSincronizacion(db)
     context = _base_context(request, "auditoria", "Auditoría y trazabilidad")
-    context.update({"ultimo_evento": repo.obtener_ultimo_evento()})
-    return templates.TemplateResponse("enterprise/auditoria.html", context)
+    context.update({"eventos": repo.listar_recientes(limit=50)})
+    return templates.TemplateResponse(request, "enterprise/auditoria.html", context)
 
 
 @router.get("/configuracion", response_class=HTMLResponse)
@@ -218,7 +218,7 @@ def configuracion(request: Request) -> HTMLResponse:
         "Modo simulación": settings.dry_run,
         "Sincronizador de stock": settings.stock_scheduler_enabled,
         "Intervalo de stock": f"{settings.stock_sync_interval_minutes} min",
-        "Importador programado": settings.import_scheduler_enabled,
+        "Importador programado (sin implementación)": "No disponible",
         "Compañía GBP": settings.gbp_company_id,
         "Sucursal GBP": settings.pedidos_gbp_branch_id,
         "Web Service GBP": settings.gbp_web_service_id,
@@ -238,4 +238,4 @@ def configuracion(request: Request) -> HTMLResponse:
     }
     context = _base_context(request, "configuracion", "Configuración operativa")
     context.update({"campos": campos})
-    return templates.TemplateResponse("enterprise/configuracion.html", context)
+    return templates.TemplateResponse(request, "enterprise/configuracion.html", context)

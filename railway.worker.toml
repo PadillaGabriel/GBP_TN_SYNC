@@ -1,0 +1,7 @@
+# Railway: servicio privado sin dominio ni exposición HTTP.
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "python -m app.procesos.worker"
+restartPolicyType = "ON_FAILURE"

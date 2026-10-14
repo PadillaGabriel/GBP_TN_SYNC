@@ -1,113 +1,82 @@
+"""El webhook responde éxito únicamente después de registrar el job."""
 import hashlib
 import hmac
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
-
-from app.infraestructura.tienda_nube.webhooks import (
-    FirmaWebhookTiendaNubeInvalidaError,
-    verificar_firma_webhook,
-)
-
-
-def _firma(cuerpo: bytes, secreto: str) -> str:
-    return hmac.new(secreto.encode(), cuerpo, hashlib.sha256).hexdigest()
-
-
-def test_verificar_firma_webhook_valida() -> None:
-    cuerpo = b'{"store_id":123,"event":"order/paid","id":456}'
-    verificar_firma_webhook(cuerpo, _firma(cuerpo, "secreto"), "secreto")
-
-
-def test_verificar_firma_webhook_rechaza_firma_incorrecta() -> None:
-    with pytest.raises(FirmaWebhookTiendaNubeInvalidaError):
-        verificar_firma_webhook(b"{}", "incorrecta", "secreto")
-
-
-def test_verificar_firma_webhook_exige_secreto() -> None:
-    with pytest.raises(FirmaWebhookTiendaNubeInvalidaError):
-        verificar_firma_webhook(b"{}", "firma", "")
-
-from types import SimpleNamespace
-
-from fastapi import BackgroundTasks
 from starlette.requests import Request
 
 from app.presentacion import rutas_pedidos
 
 
-def _request(cuerpo: bytes, firma: str) -> Request:
-    enviado = False
+def _firma(body: bytes, secret: str) -> str:
+    return hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
+
+def _request(body: bytes, signature: str) -> Request:
     async def receive():
-        nonlocal enviado
-        if enviado:
-            return {"type": "http.request", "body": b"", "more_body": False}
-        enviado = True
-        return {"type": "http.request", "body": cuerpo, "more_body": False}
+        return {"type": "http.request", "body": body, "more_body": False}
 
     return Request(
-        {
-            "type": "http",
-            "method": "POST",
-            "path": "/pedidos/webhooks/tienda-nube",
-            "headers": [(b"x-linkedstore-hmac-sha256", firma.encode())],
-        },
+        {"type": "http", "method": "POST", "path": "/pedidos/webhooks/tienda-nube",
+         "headers": [(b"x-linkedstore-hmac-sha256", signature.encode())]},
         receive,
     )
 
 
 @pytest.mark.asyncio
-async def test_webhook_aceptado_encola_orquestador_automatico(monkeypatch) -> None:
-    secreto = "secreto"
-    cuerpo = b'{"store_id":123,"event":"order/paid","id":456}'
-    configuracion = SimpleNamespace(
-        tienda_nube_webhook_secret=secreto,
+async def test_webhook_aceptado_persiste_job_y_retorna_id(monkeypatch) -> None:
+    secret = "secreto"
+    body = b'{"store_id":123,"event":"order/paid","id":456}'
+    config = SimpleNamespace(
+        tienda_nube_webhook_secret=secret,
         tienda_nube_store_id="123",
         tienda_nube_webhook_event_list=["order/paid"],
         tienda_nube_pedidos_automaticos_habilitados=True,
     )
-    monkeypatch.setattr(rutas_pedidos, "obtener_configuracion", lambda: configuracion)
-    tareas = BackgroundTasks()
+    monkeypatch.setattr(rutas_pedidos, "obtener_configuracion", lambda: config)
+    seen = []
 
-    resultado = await rutas_pedidos.recibir_webhook_tienda_nube(
-        _request(cuerpo, _firma(cuerpo, secreto)), tareas
+    class FakeRepo:
+        def __init__(self, db):
+            pass
+
+        def crear(self, **kwargs):
+            seen.append(kwargs)
+            return SimpleNamespace(id=42)
+
+    monkeypatch.setattr(rutas_pedidos, "RepositorioTrabajosSincronizacion", FakeRepo)
+    result = await rutas_pedidos.recibir_webhook_tienda_nube(
+        _request(body, _firma(body, secret)), Mock()
     )
-
-    assert resultado == {
-        "ok": True,
-        "aceptado": True,
-        "evento": "order/paid",
-        "order_id": "456",
-    }
-    assert len(tareas.tasks) == 1
-    tarea = tareas.tasks[0]
-    assert tarea.func is rutas_pedidos._procesar_pedido_tienda_nube_en_segundo_plano
-    assert tarea.args == ("456",)
+    assert result == {"ok": True, "aceptado": True, "evento": "order/paid", "order_id": "456", "job_id": 42}
+    assert seen[0]["idempotency_key"] == "tn:123:order/paid:456"
+    assert seen[0]["payload"] == {"order_id": "456"}
 
 
 @pytest.mark.asyncio
-async def test_tarea_segundo_plano_construye_y_ejecuta_orquestador(monkeypatch) -> None:
-    llamadas: list[str] = []
-
-    class SesionFalsa:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-    class ProcesadorFalso:
-        async def ejecutar(self, order_id: str):
-            llamadas.append(order_id)
-            return {"ok": True}
-
-    monkeypatch.setattr(rutas_pedidos, "SessionLocal", lambda: SesionFalsa())
+async def test_webhook_no_acepta_si_falla_persistencia(monkeypatch) -> None:
+    secret = "secreto"
+    body = b'{"store_id":123,"event":"order/paid","id":456}'
     monkeypatch.setattr(
-        rutas_pedidos,
-        "construir_procesador_pedido_tienda_nube",
-        lambda sesion: ProcesadorFalso(),
+        rutas_pedidos, "obtener_configuracion", lambda: SimpleNamespace(
+            tienda_nube_webhook_secret=secret,
+            tienda_nube_store_id="123",
+            tienda_nube_webhook_event_list=["order/paid"],
+            tienda_nube_pedidos_automaticos_habilitados=True,
+        )
     )
 
-    await rutas_pedidos._procesar_pedido_tienda_nube_en_segundo_plano("456")
+    class BrokenRepo:
+        def __init__(self, db):
+            pass
 
-    assert llamadas == ["456"]
+        def crear(self, **kwargs):
+            raise RuntimeError("DB down")
+
+    monkeypatch.setattr(rutas_pedidos, "RepositorioTrabajosSincronizacion", BrokenRepo)
+    with pytest.raises(RuntimeError, match="DB down"):
+        await rutas_pedidos.recibir_webhook_tienda_nube(
+            _request(body, _firma(body, secret)), Mock()
+        )

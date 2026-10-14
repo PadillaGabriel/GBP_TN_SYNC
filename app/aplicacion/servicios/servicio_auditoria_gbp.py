@@ -169,11 +169,19 @@ class GBPAuditService:
             resumen["candidatos_pendientes_auditar"] = len(candidatos_base)
 
             semaphore = asyncio.Semaphore(max(1, concurrency))
-            tasks = [
-                self._procesar_candidato_completo(semaphore, token, row)
-                for row in seleccionados
-            ]
-            resultados = await asyncio.gather(*tasks, return_exceptions=True)
+            # Mantener acotada la cantidad de corutinas simultáneamente instanciadas.
+            # Un semáforo solo limita la red; gather sobre todo el catálogo
+            # también reserva tareas y memoria para candidatos aún no iniciados.
+            resultados = []
+            window = max(1, concurrency) * 4
+            for start in range(0, len(seleccionados), window):
+                batch = seleccionados[start : start + window]
+                resultados.extend(
+                    await asyncio.gather(
+                        *(self._procesar_candidato_completo(semaphore, token, row) for row in batch),
+                        return_exceptions=True,
+                    )
+                )
 
             resultados_validos: list[dict[str, Any]] = []
             for item in resultados:

@@ -1,24 +1,54 @@
-{% extends "enterprise/base.html" %}{% block content %}
-<div class="metric-grid compact">{% for estado, cantidad in conteos.items() %}<article class="metric" data-job-state-metric="{{ estado }}"><span>{{ estado|replace('_',' ')|title }}</span><strong>{{ cantidad }}</strong></article>{% endfor %}</div>
-<section class="card">
+{% extends "enterprise/base.html" %}
+{% block content %}
+<div class="section-intro">
+  <div><span class="eyebrow">OBSERVABILIDAD OPERATIVA</span><h2>Cola, progreso y resultados</h2><p>Supervisá ejecuciones, inspeccioná errores y solicitá cancelaciones seguras. Los procesos interrumpidos requieren conciliación antes de reintentar.</p></div>
+  <div class="intro-actions"><a class="btn" href="/admin/panel/sincronizacion">Nueva sincronización</a><a class="btn primary" href="/admin/panel/importaciones">Nueva importación</a></div>
+</div>
+<div class="metric-grid compact jobs-metrics">
+  {% for estado in ['PENDIENTE','EN_PROCESO','CANCELACION_SOLICITADA','FINALIZADO','FINALIZADO_CON_ERRORES','ERROR','CANCELADO','REQUIERE_REVISION'] %}
+  <article class="metric" data-job-state-metric="{{ estado }}" data-state="{{ estado }}"><span>{{ estado|replace('_',' ')|title }}</span><strong>{{ conteos.get(estado, 0) }}</strong></article>
+  {% endfor %}
+</div>
+<section class="card queue-card" aria-labelledby="activeJobsHeading">
   <div class="card-head">
-    <div><span class="eyebrow">COLA OPERATIVA</span><h3>Trabajos activos</h3></div>
-    <div class="live-toolbar"><span class="live-indicator" id="jobsLiveStatus"><i></i>En vivo</span><button class="btn" id="refreshJobsNow" type="button">Actualizar</button></div>
+    <div><span class="eyebrow">EJECUCIÓN ACTUAL</span><h3 id="activeJobsHeading">Trabajos en cola o proceso</h3><p class="card-subtitle">Actualización periódica mientras esta pestaña esté visible.</p></div>
+    <div class="live-toolbar"><span class="live-indicator" id="jobsLiveStatus" role="status" aria-live="polite"><i aria-hidden="true"></i>Conectando…</span><button class="btn" id="refreshJobsNow" type="button">Actualizar ahora</button></div>
   </div>
-  <div class="job-list" id="liveActiveJobs">
+  <div class="job-list" id="liveActiveJobs" aria-label="Trabajos activos">
     {% for job in activos %}
     <div class="job-row" data-live-job-id="{{ job.id }}">
-      <span class="job-icon">↻</span>
-      <div class="job-copy"><strong>{{ job.tipo or 'Proceso' }}</strong><small>#{{ job.id }} · {{ job.estado }} · {{ job.mensaje or '' }}</small></div>
-      <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ job.progreso_porcentaje or 0 }}"><i style="width:{{ job.progreso_porcentaje or 0 }}%"></i></div>
+      <span class="job-icon" aria-hidden="true">↻</span>
+      <div class="job-copy"><strong>{{ job.tipo|replace('_',' ')|title }}</strong><small>#{{ job.id }} · {{ job.estado|replace('_',' ')|title }} · {{ job.mensaje or 'Sin novedades' }}</small></div>
+      <div class="progress" role="progressbar" aria-label="Avance #{{ job.id }}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ job.progreso_porcentaje or 0 }}"><i style="width:{{ job.progreso_porcentaje or 0 }}%"></i></div>
       <b>{{ job.progreso_porcentaje or 0 }}%</b>
-      <button class="more-btn cancel-job" type="button" data-job-id="{{ job.id }}">Cancelar</button>
+      <div class="job-actions"><button class="btn subtle" type="button" data-job-detail="{{ job.id }}">Detalle</button><button class="btn danger-outline cancel-job" type="button" data-job-id="{{ job.id }}">Cancelar</button></div>
     </div>
-    {% else %}<div class="empty"><strong>No hay trabajos activos</strong><p>La cola se encuentra libre.</p></div>{% endfor %}
+    {% else %}<div class="empty"><strong>No hay trabajos activos</strong><p>Las nuevas solicitudes aparecerán aquí.</p></div>{% endfor %}
   </div>
 </section>
-<section class="card">
-  <div class="card-head"><div><span class="eyebrow">HISTORIAL</span><h3>Ejecuciones recientes</h3></div></div>
-  <div class="table-wrap"><table><thead><tr><th>ID</th><th>Tipo</th><th>Estado</th><th>Progreso</th><th>Procesados</th><th>Mensaje</th></tr></thead><tbody id="liveRecentJobs">{% for job in recientes %}<tr data-recent-job-id="{{ job.id }}"><td>#{{ job.id }}</td><td>{{ job.tipo or '—' }}</td><td><span class="badge {% if job.estado == 'FINALIZADO' %}success{% elif job.estado in ['ERROR','FINALIZADO_CON_ERRORES'] %}danger{% elif job.estado == 'CANCELADO' %}neutral{% else %}warning{% endif %}">{{ job.estado }}</span></td><td><div class="table-progress"><div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ job.progreso_porcentaje or 0 }}"><i style="width:{{ job.progreso_porcentaje or 0 }}%"></i></div><b>{{ job.progreso_porcentaje or 0 }}%</b></div></td><td>{{ job.procesados or 0 }}{% if job.total %} / {{ job.total }}{% endif %}</td><td class="job-message-cell" title="{{ job.mensaje or '' }}">{{ job.mensaje or '—' }}</td></tr>{% endfor %}</tbody></table></div>
+<section class="card table-card jobs-history" aria-labelledby="recentJobsHeading">
+  <div class="card-head history-header"><div><span class="eyebrow">HISTORIAL</span><h3 id="recentJobsHeading">Últimas ejecuciones</h3><p class="card-subtitle">Hasta 100 ejecuciones recientes. Los filtros solo afectan los registros cargados.</p></div></div>
+  <div class="table-toolbar jobs-toolbar">
+    <label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Buscar en historial cargado</span><input id="jobSearch" type="search" placeholder="Buscar ID, tipo, SKU o mensaje" autocomplete="off"></label>
+    <label class="filter-label">Estado<select id="jobStateFilter"><option value="">Todos</option>{% for estado in ['PENDIENTE','EN_PROCESO','CANCELACION_SOLICITADA','FINALIZADO','FINALIZADO_CON_ERRORES','ERROR','CANCELADO','REQUIERE_REVISION'] %}<option value="{{ estado }}">{{ estado|replace('_',' ')|title }}</option>{% endfor %}</select></label>
+    <span class="muted" id="jobResultsCount" role="status" aria-live="polite">{{ recientes|length }} registros cargados</span>
+  </div>
+  <div class="table-wrap"><table class="jobs-table"><thead><tr><th scope="col">Job</th><th scope="col">Estado</th><th scope="col">Progreso</th><th scope="col">Procesados</th><th scope="col">Última actualización</th><th scope="col">Acción</th></tr></thead>
+    <tbody id="liveRecentJobs">
+    {% for job in recientes %}<tr data-recent-job-id="{{ job.id }}" data-state="{{ job.estado }}">
+      <td data-label="Trabajo"><strong>#{{ job.id }}</strong><small class="block">{{ job.tipo|replace('_',' ')|title }}</small></td>
+      <td data-label="Estado"><span class="badge {% if job.estado == 'FINALIZADO' %}success{% elif job.estado in ['ERROR','FINALIZADO_CON_ERRORES','REQUIERE_REVISION'] %}danger{% elif job.estado == 'CANCELADO' %}neutral{% else %}warning{% endif %}">{{ job.estado|replace('_',' ')|title }}</span></td>
+      <td data-label="Progreso"><div class="table-progress"><div class="progress" role="progressbar" aria-label="Progreso #{{ job.id }}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ job.progreso_porcentaje or 0 }}"><i style="width:{{ job.progreso_porcentaje or 0 }}%"></i></div><b>{{ job.progreso_porcentaje or 0 }}%</b></div></td>
+      <td data-label="Procesados">{{ job.procesados or 0 }}{% if job.total %} / {{ job.total }}{% endif %}</td><td data-label="Actualizado">{{ job.updated_at or '—' }}</td>
+      <td data-label="Inspección"><button class="btn subtle" type="button" data-job-detail="{{ job.id }}">Ver detalle</button></td>
+    </tr>{% else %}<tr><td colspan="6" class="empty">Aún no hay trabajos registrados.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+  <div class="history-empty empty" id="jobFilterEmpty" hidden><strong>Sin coincidencias</strong><p>Probá cambiar los filtros o actualizar el historial.</p></div>
 </section>
+<dialog class="job-dialog" id="jobDetailDialog" aria-labelledby="jobDialogTitle">
+  <div class="dialog-head"><div><span class="eyebrow">INSPECCIÓN DE EJECUCIÓN</span><h2 id="jobDialogTitle">Detalle del trabajo</h2></div><button class="icon-btn" type="button" id="closeJobDetail" aria-label="Cerrar detalle">×</button></div>
+  <div class="dialog-content" id="jobDetailContent"><p class="muted">Cargando detalle…</p></div>
+  <div class="dialog-footer"><button class="btn" type="button" id="closeJobDetailFooter">Cerrar</button></div>
+</dialog>
 {% endblock %}

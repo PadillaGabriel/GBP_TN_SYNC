@@ -8,8 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class ConfiguracionAplicacion(BaseSettings):
     """Configuracion central de la aplicacion.
 
-    Todas las decisiones operativas del integrador se controlan por variables de
-    entorno para que Render pueda ejecutar el mismo repositorio en produccion.
+    Todas las decisiones operativas se controlan por variables de entorno.
     """
 
     model_config = SettingsConfigDict(
@@ -22,6 +21,8 @@ class ConfiguracionAplicacion(BaseSettings):
     app_env: str = "local"
     app_debug: bool = False
     app_public_base_url: str = ""
+    admin_username: str = ""
+    admin_password: str = ""
     database_url: str = "sqlite+pysqlite:///./integrador_gbp_tn.db"
 
     gbp_base_url: str = Field(
@@ -66,7 +67,6 @@ class ConfiguracionAplicacion(BaseSettings):
     stock_sync_concurrency: int = 5
 
     import_scheduler_enabled: bool = False
-    product_audit_interval_hours: int = 24
 
     dry_run: bool = True
     pedidos_escritura_gbp_habilitada: bool = False
@@ -105,6 +105,10 @@ class ConfiguracionAplicacion(BaseSettings):
     pedidos_gbp_default_vat_rate: Decimal = Decimal("21")
     pedidos_gbp_vat_rate_overrides: str = ""
     log_level: str = "INFO"
+    worker_poll_seconds: float = Field(default=2.0, gt=0, le=60)
+    worker_lease_seconds: int = Field(default=120, ge=30, le=3600)
+    worker_heartbeat_seconds: int = Field(default=20, ge=5, le=300)
+
 
     @field_validator("database_url")
     @classmethod

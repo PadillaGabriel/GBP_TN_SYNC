@@ -1,0 +1,243 @@
+{
+  "source_sha256": "f23f5f383e0921c2f283086d413aca71695d547dcbdeed8ce2fe4c55b020ffe3",
+  "files": [
+    {
+      "path": ".env.example",
+      "sha256": "315b0d397c5130019b34f1f964b5396e9d84cdcdd4233e4f1ccd056b1e3e79b5",
+      "bytes": 3108,
+      "change": "MODIFIED"
+    },
+    {
+      "path": "README.md",
+      "sha256": "432c0ab296aff21ac30853795a4ee9a56c1381e87faae49c47c156c621fe7fda",
+      "bytes": 4613,
+      "change": "MODIFIED"
+    },
+    {
+      "path": "alembic.ini",
+      "sha256": "63fd9522be8f263b90f0e89829c812331ab4ec0a730cb472ef97da12c320e004",
+      "bytes": 576,
+      "change": "NEW"
+    },
+    {
+      "path": "app/aplicacion/servicios/servicio_auditoria_gbp.py",
+      "sha256": "4081b223b8acd904e7218e210f4dd0ec385a82c0221c66b79bf3990491f35f45",
+      "bytes": 29433,
+      "change": "MODIFIED"
+    },
+    {
+      "path": "app/aplicacion/trabajos/auditoria.py",
+      "sha256": "cc3042f3191da9d071fa78aae6d317a21deeb0fe017e211cb12e2ea085723b8e",
+      "bytes": 14192,
+      "change": "NEW"
+    },
+    {
+      "path": "app/aplicacion/trabajos/categorias.py",
+      "sha256": "b92e7b500292b5778605d07d9281cdc5e07b21fbd64f7f959e561c9749f33865",
+      "bytes": 2328,
+      "change": "NEW"
+    },
+    {
+      "path": "app/aplicacion/trabajos/comun.py",
+      "sha256": "8a03ceb191d7e45306fab6f055171004b4d9425382f40f29707af780db759120",
+      "bytes": 1416,
+      "change": "NEW"
+    },
+    {
+      "path": "app/aplicacion/trabajos/importacion.py",
+      "sha256": "19c0efc16895676c08af95decab61000fd7674ab731dfa4386129020d5b1ff24",
+      "bytes": 13660,
+      "change": "NEW"
+    },
+    {
+      "path": "app/aplicacion/trabajos/reconciliacion.py",
+      "sha256": "3f6d3c6f02ea3d8ad05c64eab3a4afa93c569339dab48ac43c6aaeaac4fb0eab",
+      "bytes": 2134,
+      "change": "NEW"
+    },
+    {
+      "path": "app/aplicacion/trabajos/stock.py",
+      "sha256": "71149ef56ca8294cf5ee1e0f0114ad7767ce5dc57c1be5fe22ad77342943694b",
+      "bytes": 4365,
+      "change": "NEW"
+    },
+    {
+      "path": "app/aplicacion/trabajos/trabajos_masivos.py",
+      "sha256": "571dfe882fda13d1031b4dd0825d498730149f5ca5a40a763bf82efc185fbb33",
+      "bytes": 675,
+      "change": "MODIFIED"
+    },
+    {
+      "path": "app/configuracion.py",
+      "sha256": "d44badaf1c43ac68d2b3d71e243f830fbcac1cbd92fc7cfeee43ec8d13cc575d",
+      "bytes": 5761,
+      "change": "MODIFIED"
+    },
+    {
+      "path": "app/infraestructura/persistencia/base_datos.py",
+      "sha256": "8e4b1162500d5aa7a9d7609064367e969c58cbfbbcfcc8e12898c268d68aa4a1",
+      "bytes": 556,
+      "change": "MODIFIED"
+    },
+    {
+      "path": "app/infraestructura/persistencia/modelos.py",
+      "sha256": "4460d91d8167e8d9e03692b758b4449bf3d1a052bd422c9fb67e3cbde819c104",
+      "bytes": 15602,
+      "change": "MODIFIED"
+    },
+    {
+      "path": "app/infraestructura/persistencia/repositorios/trabajos_sincronizacion.py",
+      "sha256": "a7f5291230a7760a12b95f5d6a133d3b2368fcc481125564725c00852a1df20c",
+      "bytes": 11879,
+      "change": "MODIFIED"
+    },
+    {
+      "path": "app/presentacion/rutas_administracion.py",
+      "sha256": "a358d761bc4faee2d830411c2f769e7d4a3a26c80e31c0c48ce2e5067d38a9dc",
+      "bytes": 27015,
+      "change": "MODIFIED"
+    },
+    {
+      "path": "app/presentacion/rutas_pedidos.py",
+      "sha256": "9145178d3464cfdfc6abf03c93a938d31faaf14b44fcbfcae2d553be773e4e21",
+      "bytes": 12018,
+      "change": "MODIFIED"
+    },
+    {
+      "path": "app/presentacion/rutas_salud.py",
+      "sha256": "06eba7d65ac5e8bead2d4fe40a9a4904e06957e469288e86a9d270d31f1c10df",
+      "bytes": 746,
+      "change": "MODIFIED"
+    },
+    {
+      "path": "app/presentacion/rutas_sincronizacion.py",
+      "sha256": "928741736efa22f9e60ac07fc30fe51cbd8d859deabbc5596c9a5ea652f71b0c",
+      "bytes": 12953,
+      "change": "MODIFIED"
+    },
+    {
+      "path": "app/principal.py",
+      "sha256": "73f1473df0ee70686901198c6974778b8ce42bf6fd4223f6afa522bc2e2320e5",
+      "bytes": 1702,
+      "change": "MODIFIED"
+    },
+    {
+      "path": "app/procesos/programador.py",
+      "sha256": "0ccbeb59ec0b20761492678ebd3aa6a7ffed6699e1be010da7e72903b0d2c795",
+      "bytes": 2596,
+      "change": "MODIFIED"
+    },
+    {
+      "path": "app/procesos/worker.py",
+      "sha256": "2d6859d6c9947e1c4c54593d5a38e3df62d7931b389b0de0536f8ca4166aa21c",
+      "bytes": 6253,
+      "change": "NEW"
+    },
+    {
+      "path": "app/seguridad/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "change": "NEW"
+    },
+    {
+      "path": "app/seguridad/administracion.py",
+      "sha256": "d1a43b8fd698bf9654f19b42b1722546b05096e7cc8cb59575fe766dd7116bad",
+      "bytes": 2073,
+      "change": "NEW"
+    },
+    {
+      "path": "app/static/enterprise/features/jobs.js",
+      "sha256": "f9545b970f6747dabea55c82fd9f2e3dd739ff4274f77ddb31657ec82c4a3dbe",
+      "bytes": 8569,
+      "change": "MODIFIED"
+    },
+    {
+      "path": "docs/REFRACTORIZACION_RAILWAY_2026-10-13.md",
+      "sha256": "ea59bec5573bc0eb850e5d3f1c6c4e845e740ceef2cbc777c8f8438c8f02593e",
+      "bytes": 7975,
+      "change": "NEW"
+    },
+    {
+      "path": "migrations/env.py",
+      "sha256": "75a97c0da30816c619502e362d0ffc5c210381f67fb04fd4e08729f48608f23f",
+      "bytes": 1288,
+      "change": "NEW"
+    },
+    {
+      "path": "migrations/script.py.mako",
+      "sha256": "d38920781b4d31ae1c0a71bc09f41c2ade8feab9e5a087e3f30cb4bbf0c1c9d3",
+      "bytes": 704,
+      "change": "NEW"
+    },
+    {
+      "path": "migrations/versions/0001_baseline_existing_schema.py",
+      "sha256": "71e6f95b879715d15873c105942bf9f2d3b324088458631161fa86db4350b013",
+      "bytes": 19409,
+      "change": "NEW"
+    },
+    {
+      "path": "migrations/versions/0002_durable_jobs.py",
+      "sha256": "516f0dbaf100fc5201391b7ef9964ff2cf30d2f47360f93fe0d86d0261d9b86f",
+      "bytes": 2498,
+      "change": "NEW"
+    },
+    {
+      "path": "railway.scheduler.toml",
+      "sha256": "178cc692d105fcdff21309a3af14d5eee7f1b433eb8e7fbc9c582e1d98282fb1",
+      "bytes": 219,
+      "change": "NEW"
+    },
+    {
+      "path": "railway.web.toml",
+      "sha256": "2b84988461f1f9f2d4be5d4b1e028484ef809288b315a62eb7c6543c20bb6740",
+      "bytes": 243,
+      "change": "NEW"
+    },
+    {
+      "path": "railway.worker.toml",
+      "sha256": "99d6b830c682a2a416096fb2aa2c80c40d178d7e24a8dccf27e91d16a665c4cd",
+      "bytes": 180,
+      "change": "NEW"
+    },
+    {
+      "path": "scripts/preflight_railway.py",
+      "sha256": "eb09104236a3265932f5ab70e0e9e4f5c7a3980234db1a70463988956bbb943d",
+      "bytes": 2879,
+      "change": "NEW"
+    },
+    {
+      "path": "tests/test_programador_stock_resiliencia.py",
+      "sha256": "8f78892db65b67c556c88fce88c7e99142c9c19ffd6a927972cf80249db8f759",
+      "bytes": 2539,
+      "change": "MODIFIED"
+    },
+    {
+      "path": "tests/test_seguridad_admin.py",
+      "sha256": "e8c070e6867b873af795beed945c335232a96f5473d6e317cd44af25fbadfc4e",
+      "bytes": 1410,
+      "change": "NEW"
+    },
+    {
+      "path": "tests/test_tienda_nube_webhooks.py",
+      "sha256": "e5fa86a5b4f75f0b0567f28f4587be2682a53c6e17a9661ac9684e3714f1c4b9",
+      "bytes": 2789,
+      "change": "MODIFIED"
+    },
+    {
+      "path": "tests/test_worker_dispatch.py",
+      "sha256": "44896eeda78cc72020528b5b732c92175a1e324ca0b11251677ca491e42436ab",
+      "bytes": 776,
+      "change": "NEW"
+    },
+    {
+      "path": "tests/test_worker_durable.py",
+      "sha256": "04ca1a25e665bf656f9321cd2993261c18aa5c776991b2396f7c18a75fb1afb7",
+      "bytes": 4299,
+      "change": "NEW"
+    }
+  ],
+  "base": "ZIP subido; aplicar con rutas preservadas sobre copia del repositorio",
+  "contains_secrets": false,
+  "test_result": "117 passed; API smoke /health /openapi.json; Alembic SQLite upgrade/downgrade/check",
+  "production_gate": "NO-GO hasta PostgreSQL/Railway/GBP/TN/backups verificados"
+}
