@@ -15,6 +15,14 @@
     </form>
   </section>
   <section class="card">
+    <div class="card-head"><div><span class="eyebrow">STOCK · ID 15</span><h3>Sincronización incremental</h3></div></div>
+    <p>Consulta los artículos modificados en los últimos 15 minutos y encola el trabajo para el WORKER.</p>
+    <form class="form-stack job-form" action="/admin/panel/stock/run-incremental" method="post" data-job-form>
+      <button class="btn primary large">Sincronizar movimientos ahora</button>
+    </form>
+    <small>Los cambios reales en Tiendanube dependen de la configuración DRY_RUN del WORKER.</small>
+  </section>
+  <section class="card">
     <div class="card-head"><div><span class="eyebrow">ARTÍCULO</span><h3>Sincronización individual</h3></div></div>
     <form class="form-stack job-form" action="/admin/panel/stock/run-sku" method="post" data-job-form>
       <label>SKU<input name="sku" required placeholder="Ej. 8082"></label>

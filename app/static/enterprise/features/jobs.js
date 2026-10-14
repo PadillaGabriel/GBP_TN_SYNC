@@ -150,7 +150,7 @@ function prepareFormRequest(form) {
     for (const [key, value] of data.entries()) url.searchParams.set(key, String(value));
     return { url: url.toString(), options: { method } };
   }
-  if (form.enctype.includes("multipart/form-data") || form.action.endsWith("/panel/importar-sku")) {
+  if (form.enctype.includes("multipart/form-data") || form.action.endsWith("/panel/importar-sku") || url.pathname.endsWith("/panel/stock/run-sku")) {
     return { url: url.toString(), options: { method, body: data } };
   }
   for (const [key, value] of data.entries()) url.searchParams.set(key, String(value));

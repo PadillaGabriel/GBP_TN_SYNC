@@ -651,6 +651,37 @@ async def panel_stock_run_now(
     )
 
 
+@router.post("/panel/stock/run-incremental")
+async def panel_stock_run_incremental(
+    db: Session = Depends(obtener_sesion_bd),
+) -> JSONResponse:
+    """Encola manualmente el mismo trabajo incremental que procesa el WORKER."""
+    repo = RepositorioTrabajosSincronizacion(db)
+    # Evita crear otro job cuando ya hay uno incremental pendiente o en proceso.
+    # La coordinación definitiva entre schedulers sigue siendo por idempotency_key.
+    for activo in repo.listar_activos(limit=1000):
+        if activo.get("tipo") == "STOCK_SYNC_INCREMENTAL":
+            return JSONResponse({
+                "ok": True,
+                "job_id": activo["id"],
+                "tipo": "STOCK_SYNC_INCREMENTAL",
+                "reutilizado": True,
+                "status_url": f"/admin/panel/jobs/{activo['id']}",
+            })
+    settings = obtener_configuracion()
+    job = repo.crear(
+        tipo="STOCK_SYNC_INCREMENTAL",
+        payload={"batch_limit": settings.stock_sync_batch_size},
+        progreso={"mensaje": "Stock incremental solicitado manualmente.", "porcentaje": 0},
+    )
+    return JSONResponse({
+        "ok": True,
+        "job_id": job.id,
+        "tipo": job.tipo,
+        "status_url": f"/admin/panel/jobs/{job.id}",
+    })
+
+
 @router.post("/panel/stock/run-sku")
 async def panel_stock_run_sku(
     sku: str = Form(..., min_length=1),
