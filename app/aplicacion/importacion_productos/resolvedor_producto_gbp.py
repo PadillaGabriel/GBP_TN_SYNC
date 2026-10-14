@@ -75,7 +75,7 @@ class ResolvedorProductoGBP:
             publicable_web=None,
             item_disabled=False,
             item_not_for_sale=False,
-            descripcion_web=titulo_final,
+            descripcion_web=None,
             imagenes=[],
             precio_importado=None,
             stock=None,

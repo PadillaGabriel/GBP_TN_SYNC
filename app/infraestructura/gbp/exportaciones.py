@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -23,6 +23,9 @@ class SnapshotExportacionGBP:
     filas: list[dict[str, str]]
     duracion_ms: int
     generado_en: float
+    por_item_id: dict[str, dict[str, str]] = field(default_factory=dict)
+    por_codigo: dict[str, dict[str, str]] = field(default_factory=dict)
+    indexado: bool = False
 
 
 class ProveedorExportacionesGBP:
@@ -73,16 +76,18 @@ class ProveedorExportacionesGBP:
         item_id_text = str(item_id).strip() if item_id is not None else ""
         item_code_text = str(item_code or sku or "").strip().casefold()
 
-        for fila in snapshot.filas:
-            if item_id_text and str(fila.get("item_id") or "").strip() == item_id_text:
-                return fila
-            if (
-                item_code_text
-                and str(fila.get("item_code") or "").strip().casefold()
-                == item_code_text
-            ):
-                return fila
-        return None
+        if not snapshot.indexado:
+            for fila in snapshot.filas:
+                key_id = str(fila.get("item_id") or "").strip()
+                key_code = str(fila.get("item_code") or "").strip().casefold()
+                if key_id:
+                    snapshot.por_item_id.setdefault(key_id, fila)
+                if key_code:
+                    snapshot.por_codigo.setdefault(key_code, fila)
+            snapshot.indexado = True
+        if item_id_text and item_id_text in snapshot.por_item_id:
+            return snapshot.por_item_id[item_id_text]
+        return snapshot.por_codigo.get(item_code_text) if item_code_text else None
 
 
 def detectar_error_generacion(filas: list[dict[str, str]]) -> str | None:
@@ -102,9 +107,9 @@ def producto_desde_exportacion(row: dict[str, str]) -> Producto:
     sku = str(row.get("item_code") or "").strip()
     item_id = str(row.get("item_id") or "").strip()
     titulo = str(row.get("descripcion_corta") or row.get("item_desc") or sku).strip()
-    descripcion = str(
-        row.get("descripcion_larga") or row.get("item_desc") or titulo
-    ).strip()
+    # Contrato exportación 12: solo item_ML_desc, expuesto como descripcion_larga.
+    # No convertir una ausencia de descripción en un título comercial ficticio.
+    descripcion = str(row.get("descripcion_larga") or "").strip()
     imagenes = [
         ImagenProducto(url=url.strip(), orden=index)
         for index, url in enumerate(

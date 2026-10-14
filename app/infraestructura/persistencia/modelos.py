@@ -184,6 +184,22 @@ class CategoriaNormalizacionModel(Base):
     )
 
 
+class CategoriaTiendaMapeoModel(Base):
+    """Identidad verificada de categoría canónica por tienda y padre."""
+
+    __tablename__ = "categoria_tienda_mapeos"
+    __table_args__ = (
+        UniqueConstraint("store_id", "parent_id", "clave_canonica", name="uq_categoria_tienda_mapeo_identidad"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    store_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    parent_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    clave_canonica: Mapped[str] = mapped_column(String(240), nullable=False)
+    tn_category_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class DepositoEcommerceModel(Base):
     """Depositos habilitados para calcular stock publicable."""
 

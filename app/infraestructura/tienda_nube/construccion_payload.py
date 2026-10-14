@@ -81,10 +81,12 @@ class TiendaNubePayloadBuilder:
 
         payload: dict[str, Any] = {
             "name": {"es": normalizar_texto_gbp(producto.titulo)},
-            "description": {
-                "es": self._format_description_html(producto.descripcion_web)
-            },
         }
+        # Sin descripción en GBP: no sobrescribir una ya publicada ni inventarla.
+        if (producto.descripcion_web or "").strip():
+            payload["description"] = {
+                "es": self._format_description_html(producto.descripcion_web)
+            }
 
         if category_ids:
             payload["categories"] = category_ids

@@ -4,7 +4,9 @@ from collections.abc import Callable
 
 from app.configuracion import ConfiguracionAplicacion
 from app.infraestructura.tienda_nube.adaptador import AdaptadorTiendaNube
+from app.infraestructura.tienda_nube.coordinacion_categorias import CoordinadorCategoriasPostgres
 from app.infraestructura.tienda_nube.cliente import ClienteTiendaNube
+from app.infraestructura.tienda_nube.mapeo_categorias import MapeoCategoriasPostgres
 
 
 class FabricaAdaptadorTiendaNube:
@@ -26,10 +28,25 @@ class FabricaAdaptadorTiendaNube:
             access_token=self._configuracion.tienda_nube_access_token,
             timeout_seconds=self._configuracion.tienda_nube_timeout_seconds,
         )
+        coordinador = None
+        mapeo = None
+        if self._configuracion.database_url.startswith(("postgresql://", "postgresql+psycopg://")):
+            mapeo = MapeoCategoriasPostgres(
+                database_url=self._configuracion.database_url,
+                store_id=self._configuracion.tienda_nube_store_id,
+            )
+            coordinador = CoordinadorCategoriasPostgres(
+                database_url=self._configuracion.database_url,
+                store_id=self._configuracion.tienda_nube_store_id,
+            )
+        elif self._configuracion.app_env.lower() in {"production", "prod"}:
+            raise RuntimeError("Se requiere PostgreSQL para crear categorías en producción")
         return AdaptadorTiendaNube(
             client=cliente,
             image_normalization_enabled=self._configuracion.image_normalization_enabled,
             image_normalization_base_url=self._configuracion.app_public_base_url,
             image_normalization_canvas_size=self._configuracion.image_normalization_canvas_size,
             category_name_resolver=self._category_name_resolver,
+            category_coordinator=coordinador,
+            category_mapping=mapeo,
         )

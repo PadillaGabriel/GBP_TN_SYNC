@@ -272,7 +272,7 @@ class ClienteTiendaNube:
                     params={"page": page, "per_page": per_page},
                 )
                 if response.status_code == 404 and page > 1:
-                    break
+                    raise RuntimeError("Listado de categorías incompleto: página posterior devolvió 404")
                 self._raise_for_status(response)
                 data = response.json()
                 if not isinstance(data, list) or not data:
@@ -280,6 +280,12 @@ class ClienteTiendaNube:
                 categories.extend(data)
                 if len(data) < per_page:
                     break
+            else:
+                # Sin un árbol exhaustivo no es seguro decidir que una categoría no existe.
+                raise RuntimeError(
+                    "Categorías de Tiendanube: se alcanzó el límite de paginación; "
+                    "no se crearán categorías sin comprobar el árbol completo"
+                )
         return categories
 
     async def create_category(self, payload: dict[str, Any]) -> dict[str, Any]:
