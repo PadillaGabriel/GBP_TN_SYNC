@@ -153,12 +153,6 @@ def exportaciones(request: Request) -> HTMLResponse:
         {
             "exportaciones": [
                 {
-                    "id": settings.gbp_export_producto_por_item_id,
-                    "nombre": "TN_PRODUCTO_POR_ITEM",
-                    "uso": "Ficha interactiva dentro de GBP",
-                    "compatible_ws": False,
-                },
-                {
                     "id": settings.gbp_export_productos_general_id,
                     "nombre": "TN_PRODUCTOS_GENERAL",
                     "uso": "Catálogo completo y consulta por SKU",
@@ -173,7 +167,13 @@ def exportaciones(request: Request) -> HTMLResponse:
                 {
                     "id": settings.gbp_export_productos_stock_id,
                     "nombre": "TN_PRODUCTOS_STOCK",
-                    "uso": "Stock operativo",
+                    "uso": "Stock operativo completo",
+                    "compatible_ws": True,
+                },
+                {
+                    "id": settings.gbp_export_movimientos_stock_id,
+                    "nombre": "TN_MOVIMIENTOS_STOCK",
+                    "uso": "Artículos afectados en los últimos 15 minutos",
                     "compatible_ws": True,
                 },
             ]

@@ -104,6 +104,11 @@ async def listar_exportaciones_gbp() -> dict[str, object]:
             "nombre": "TN_PRODUCTOS_STOCK",
             "compatible_ws": True,
         },
+        {
+            "export_id": settings.gbp_export_movimientos_stock_id,
+            "nombre": "TN_MOVIMIENTOS_STOCK",
+            "compatible_ws": True,
+        },
     ]
     resultados: list[dict[str, object]] = []
 
@@ -159,6 +164,46 @@ async def listar_exportaciones_gbp() -> dict[str, object]:
         "ok": bool(operativas) and all(item["ok"] is True for item in operativas),
         "items": resultados,
     }
+
+
+@router.get("/exportaciones/movimientos")
+async def diagnosticar_movimientos_stock() -> dict[str, object]:
+    """Consulta GBP exportación 15 sin escribir stock ni programar trabajos."""
+
+    settings = obtener_configuracion()
+    cliente = ClienteGBP(
+        base_url=settings.gbp_base_url,
+        username=settings.gbp_username,
+        password=settings.gbp_password,
+        timeout_seconds=max(settings.gbp_timeout_seconds, 120),
+        company_id=settings.gbp_company_id,
+        web_service_id=settings.gbp_web_service_id,
+        retry_attempts=settings.gbp_retry_attempts,
+        retry_backoff_seconds=settings.gbp_retry_backoff_seconds,
+    )
+    proveedor = ProveedorExportacionesGBP(cliente, cache_seconds=0)
+    export_id = settings.gbp_export_movimientos_stock_id
+    try:
+        snapshot = await proveedor.ejecutar(export_id, usar_cache=False)
+        filas = snapshot.filas
+        return {
+            "ok": True,
+            "export_id": export_id,
+            "total_filas": len(filas),
+            "filas_mostradas": min(len(filas), 100),
+            "duracion_ms": snapshot.duracion_ms,
+            "columnas": list(filas[0].keys()) if filas else [],
+            "items": filas[:100],
+            "detalle": "Sin movimientos detectados." if not filas else None,
+        }
+    except Exception as exc:  # noqa: BLE001 - diagnóstico administrativo.
+        logger.exception("Error consultando exportación incremental GBP %s", export_id)
+        return {
+            "ok": False,
+            "export_id": export_id,
+            "error": type(exc).__name__,
+            "detalle": str(exc),
+        }
 
 
 @router.get("/exportaciones/producto/{item_code}")

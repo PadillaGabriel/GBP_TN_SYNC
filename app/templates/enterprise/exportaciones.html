@@ -8,8 +8,8 @@
       <h3>Exportaciones personalizadas activas</h3>
       <p class="lead">
         Verificá disponibilidad, filas y duración de los contratos consumidos
-        por el Integrador. La exportación individual ID 11 es interactiva y no
-        se ejecuta mediante wsExportDataById.
+        por el Integrador. La exportación 15 informa artículos afectados
+        durante los últimos 15 minutos; cero filas es un resultado válido.
       </p>
     </div>
     <button class="btn primary" id="testExports" type="button">
@@ -51,36 +51,16 @@
 <section class="card">
   <div class="card-head">
     <div>
-      <span class="eyebrow">FICHA INDIVIDUAL</span>
-      <h3>Inspeccionar artículo exportado</h3>
+      <span class="eyebrow">DIAGNÓSTICO INCREMENTAL</span>
+      <h3>Inspeccionar movimientos de stock — ID 15</h3>
       <p class="lead">
-        Buscá por el item_code utilizado como SKU en GBP y Tiendanube.
+        Consulta en vivo a GBP mediante wsExportDataById. Solo lectura:
+        no sincroniza ni modifica stock en Tiendanube. La ventana de
+        15 minutos está definida en el SQL del reporte GBP.
       </p>
     </div>
+    <button class="btn" id="testMovements" type="button">Consultar movimientos</button>
   </div>
-
-  <form class="form-inline" id="exportProductForm" autocomplete="off">
-    <label for="exportItemCode">
-      SKU / Código de artículo
-      <input
-        id="exportItemCode"
-        name="item_code"
-        type="text"
-        required
-        minlength="1"
-        maxlength="100"
-        autocomplete="off"
-        spellcheck="false"
-        placeholder="Ejemplo: 8082"
-      >
-    </label>
-    <button class="btn" type="submit">Consultar ficha</button>
-  </form>
-
-  <pre
-    class="result-console"
-    id="exportProductResult"
-    aria-live="polite"
-  >Sin consulta.</pre>
+  <pre class="result-console" id="exportMovementsResult" aria-live="polite">Sin consulta.</pre>
 </section>
 {% endblock %}

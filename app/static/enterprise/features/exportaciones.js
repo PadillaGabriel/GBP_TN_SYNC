@@ -1,11 +1,10 @@
-import { normalizeText, query, queryAll, renderResult, requireElement } from "../core/dom.js";
+import { query, queryAll, renderResult, requireElement } from "../core/dom.js";
 import { errorMessage, request } from "../core/http.js";
 import { setButtonBusy, toast } from "../core/ui.js";
 
 const routes = {
   status: "/admin/exportaciones",
-  product: (itemCode) =>
-    `/admin/exportaciones/producto/${encodeURIComponent(itemCode)}`,
+  movements: "/admin/exportaciones/movimientos",
 };
 
 function setCardState(card, { status, ok = null, rows = "—", duration = "—", error = "" }) {
@@ -81,41 +80,30 @@ function initializeExportTests() {
   });
 }
 
-function initializeProductLookup() {
-  const form = query("#exportProductForm");
-  if (!form) return;
+function initializeMovementsLookup() {
+  const button = query("#testMovements");
+  if (!button) return;
+  const output = requireElement("#exportMovementsResult", "el resultado de movimientos");
 
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const input = requireElement("#exportItemCode", "el campo SKU");
-    const output = requireElement("#exportProductResult", "el resultado de ficha");
-    const button = form.querySelector('button[type="submit"]');
-    const itemCode = normalizeText(input.value);
-
-    if (!itemCode) {
-      renderResult(output, {
-        ok: false,
-        error: "SKU_REQUERIDO",
-        detalle: "Ingresá el SKU o item_code de GBP.",
-      });
-      input.focus();
-      return;
-    }
-
+  button.addEventListener("click", async () => {
     setButtonBusy(button, true, "Consultando…");
-    renderResult(output, "Consultando GBP…");
+    renderResult(output, "Consultando exportación 15 en GBP…");
     try {
-      const result = await request(routes.product(itemCode));
+      const result = await request(routes.movements);
       renderResult(output, result);
       toast(
-        result.ok ? "Ficha GBP obtenida." : result.detalle || result.error,
+        result.ok
+          ? result.total_filas === 0
+            ? "Exportación 15 operativa: sin movimientos recientes."
+            : `Exportación 15: ${result.total_filas} filas detectadas.`
+          : result.detalle || result.error || "Error en consulta GBP.",
         result.ok ? "success" : "warning",
         6500,
       );
     } catch (error) {
       renderResult(output, {
         ok: false,
-        error: error.name || "ERROR_CONSULTA_EXPORTACION",
+        error: error.name || "ERROR_CONSULTA_MOVIMIENTOS",
         detalle: errorMessage(error),
         status: error.status,
       });
@@ -128,5 +116,5 @@ function initializeProductLookup() {
 
 export function initializeExports() {
   initializeExportTests();
-  initializeProductLookup();
+  initializeMovementsLookup();
 }
