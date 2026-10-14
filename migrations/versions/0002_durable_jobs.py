@@ -33,7 +33,9 @@ def upgrade() -> None:
     op.create_index("ix_sync_jobs_claim", "sync_jobs", ["estado", "prioridad", "created_at"])
     # Nunca recuperar automáticamente un job legado que pudo aplicar efectos externos.
     op.execute("UPDATE sync_jobs SET estado='REQUIERE_REVISION' WHERE estado='EN_PROCESO'")
-    op.execute("UPDATE sync_jobs SET estado='CANCELADO' WHERE estado='CANCELACION_SOLICITADA'")
+    # Una cancelación solicitada no equivale a una cancelación confirmada.
+    # Retener la incertidumbre operativa y exigir conciliación manual.
+    op.execute("UPDATE sync_jobs SET estado='REQUIERE_REVISION' WHERE estado='CANCELACION_SOLICITADA'")
     op.execute("UPDATE sync_jobs SET progreso_json=error_mensaje WHERE error_mensaje LIKE '{%'")
 
 
