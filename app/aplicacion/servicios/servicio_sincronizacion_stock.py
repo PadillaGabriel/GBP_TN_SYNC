@@ -114,8 +114,74 @@ class StockSyncService:
                 f"mapeos_obsoletos={resumen['mapeos_obsoletos']} "
                 f"errores={resumen['errores']} dry_run={self.settings.dry_run}"
             ),
-            metodo_gbp="wsExportDataById(14)",
+            metodo_gbp=f"wsExportDataById({exportacion})",
             duracion_ms=int(resumen["duration_ms"]),
+        )
+        return normalizar_objeto_gbp(resumen)
+
+    async def sincronizar_incremental(
+        self,
+        *,
+        limit: int = 100,
+        on_progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        """Procesa todos los artículos devueltos por la exportación 15.
+
+        `limit` determina el tamaño de los bloques de búsqueda, no restringe los
+        cambios: omitir registros de una ventana móvil podría perder actualizaciones.
+        Una exportación vacía es un ciclo válido, nunca una orden de poner stock cero.
+        """
+        started = time.perf_counter()
+        snapshot = await self.exportaciones.ejecutar(
+            self.settings.gbp_export_movimientos_stock_id, usar_cache=False
+        )
+        por_item: dict[str, dict[str, str]] = {}
+        for row in snapshot.filas:
+            item_id = str(row.get("item_id") or "").strip()
+            if not item_id:
+                raise ValueError("Exportación incremental 15 con item_id vacío")
+            if item_id in por_item:
+                raise ValueError(f"Exportación incremental 15 con item_id duplicado: {item_id}")
+            por_item[item_id] = row
+
+        items = self.productos.listar_mapeos_activos_para_stock_por_item_ids(
+            set(por_item), batch_size=max(1, limit)
+        )
+        resumen = self._empty_summary(limit=limit)
+        resumen["export_id"] = self.settings.gbp_export_movimientos_stock_id
+        resumen["detectados_gbp"] = len(por_item)
+        resumen["seleccionados"] = len(items)
+        resultados: list[dict[str, Any]] = []
+        for index, item in enumerate(items, start=1):
+            row = por_item[str(item["id_sistema_gbp"]).strip()]
+            result = await self._sincronizar_item(
+                item, fila_stock=row, export_id=self.settings.gbp_export_movimientos_stock_id
+            )
+            resultados.append(result)
+            self._sumar_resultado(resumen, result)
+            if on_progress is not None:
+                on_progress({
+                    **resumen,
+                    "procesados": index,
+                    "total": len(items),
+                    "sku_actual": str(item.get("sku") or ""),
+                })
+        resumen["ok"] = resumen["errores"] == 0
+        resumen["resultados_muestra"] = resultados[:20]
+        resumen["duration_ms"] = int((time.perf_counter() - started) * 1000)
+        self.auditoria.registrar(
+            sku=None,
+            accion="STOCK_SYNC_INCREMENTAL",
+            estado="OK" if resumen["ok"] else "OK_CON_ERRORES",
+            mensaje=(
+                f"detectados={resumen['detectados_gbp']} "
+                f"seleccionados={resumen['seleccionados']} "
+                f"actualizados={resumen['actualizados']} "
+                f"sin_cambios={resumen['sin_cambios']} "
+                f"errores={resumen['errores']}"
+            ),
+            metodo_gbp=f"wsExportDataById({self.settings.gbp_export_movimientos_stock_id})",
+            duracion_ms=resumen["duration_ms"],
         )
         return normalizar_objeto_gbp(resumen)
 
@@ -166,7 +232,8 @@ class StockSyncService:
         )
 
     async def _sincronizar_item(
-        self, item: dict[str, Any], *, fila_stock: dict[str, str] | None
+        self, item: dict[str, Any], *, fila_stock: dict[str, str] | None,
+        export_id: int | None = None,
     ) -> dict[str, Any]:
         sku = str(item["sku"])
         producto_id = int(item["producto_fuente_id"])
@@ -174,12 +241,14 @@ class StockSyncService:
         tn_product_id = str(item["tn_product_id"])
         tn_variant_id = str(item.get("tn_variant_id") or "")
         stock_anterior = item.get("stock_publicable_tn")
+        exportacion = export_id or self.settings.gbp_export_productos_stock_id
 
         try:
             if fila_stock is None:
                 raise RuntimeError("El item no está presente en TN_PRODUCTOS_STOCK")
             stock = stock_desde_exportacion(fila_stock)
-            self.productos.guardar_stock(producto_id, stock)
+            # Consultar GBP no prueba que la actualización TN se haya completado.
+            self.productos.guardar_stock(producto_id, stock, actualizar_publicable=False)
 
             if not stock.consultable:
                 self.auditoria.registrar(
@@ -187,7 +256,7 @@ class StockSyncService:
                     accion="STOCK_SYNC_SKU",
                     estado="STOCK_NO_CONSULTABLE",
                     mensaje="GBP no devolvió stock consultable para el depósito ecommerce configurado.",
-                    metodo_gbp="wsExportDataById(14)",
+                    metodo_gbp=f"wsExportDataById({exportacion})",
                 )
                 return {
                     "sku": sku,
@@ -200,13 +269,14 @@ class StockSyncService:
 
             stock_nuevo = int(stock.cantidad)
             if stock_anterior is not None and int(stock_anterior) == stock_nuevo:
+                self.productos.guardar_stock(producto_id, stock)
                 self.productos.marcar_stock_sync_tienda_nube(sku)
                 self.auditoria.registrar(
                     sku=sku,
                     accion="STOCK_SYNC_SKU",
                     estado="SIN_CAMBIOS",
                     mensaje=f"Stock sin cambios: {stock_nuevo}",
-                    metodo_gbp="wsExportDataById(14)",
+                    metodo_gbp=f"wsExportDataById({exportacion})",
                 )
                 return {
                     "sku": sku,
@@ -237,6 +307,7 @@ class StockSyncService:
                         variant_id=tn_variant_id,
                         stock=stock_nuevo,
                     )
+                    self.productos.guardar_stock(producto_id, stock)
                     self.productos.marcar_stock_sync_tienda_nube(sku)
                     estado = "ACTUALIZADO"
                 except TiendaNubeHTTPError as exc:
@@ -262,6 +333,7 @@ class StockSyncService:
                         variant_id=tn_variant_id,
                         stock=stock_nuevo,
                     )
+                    self.productos.guardar_stock(producto_id, stock)
                     self.productos.marcar_stock_sync_tienda_nube(sku)
                     estado = "ACTUALIZADO_MAPEO_REPARADO"
 
@@ -270,7 +342,7 @@ class StockSyncService:
                 accion="STOCK_SYNC_SKU",
                 estado=estado,
                 mensaje=f"stock_anterior={stock_anterior} stock_nuevo={stock_nuevo} dry_run={self.settings.dry_run}",
-                metodo_gbp="wsExportDataById(14) -> TiendaNube.update_variant_stock",
+                metodo_gbp=f"wsExportDataById({exportacion}) -> TiendaNube.update_variant_stock",
             )
             return {
                 "sku": sku,
@@ -292,7 +364,7 @@ class StockSyncService:
                     accion="STOCK_SYNC_SKU",
                     estado="ERROR",
                     mensaje=f"{type(exc).__name__}: {exc}",
-                    metodo_gbp="wsExportDataById(14)",
+                    metodo_gbp=f"wsExportDataById({exportacion})",
                 )
             except Exception:  # noqa: BLE001
                 logger.exception("stock_sync_audit_failed", extra={"sku": sku})

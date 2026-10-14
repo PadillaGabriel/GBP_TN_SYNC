@@ -44,6 +44,7 @@ class ConfiguracionAplicacion(BaseSettings):
     gbp_export_productos_general_id: int = 12
     gbp_export_productos_precios_id: int = 13
     gbp_export_productos_stock_id: int = 14
+    gbp_export_movimientos_stock_id: int = 15
     gbp_export_cache_seconds: int = 120
 
     tienda_nube_store_id: str = ""
@@ -62,6 +63,7 @@ class ConfiguracionAplicacion(BaseSettings):
     ecommerce_storage_ids: str = "18"
 
     stock_scheduler_enabled: bool = False
+    stock_incremental_enabled: bool = False
     stock_sync_interval_minutes: int = 10
     stock_sync_batch_size: int = 50
     stock_sync_concurrency: int = 5

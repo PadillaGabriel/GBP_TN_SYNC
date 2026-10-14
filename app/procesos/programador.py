@@ -44,8 +44,8 @@ class IntegradorScheduler:
         bucket = int(datetime.now(UTC).timestamp()) // interval
         with SessionLocal() as db:
             job = RepositorioTrabajosSincronizacion(db).crear(
-                tipo="STOCK_SYNC_LOTE",
-                idempotency_key=f"stock-schedule:{interval}:{bucket}",
+                tipo="STOCK_SYNC_INCREMENTAL" if getattr(self.settings, "stock_incremental_enabled", False) else "STOCK_SYNC_LOTE",
+                idempotency_key=f"stock-schedule:{'incremental' if getattr(self.settings, 'stock_incremental_enabled', False) else 'lote'}:{interval}:{bucket}",
                 payload={"batch_limit": self.settings.stock_sync_batch_size},
                 progreso={"mensaje": "Sincronización programada en cola.", "porcentaje": 0},
             )

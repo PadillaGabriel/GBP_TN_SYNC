@@ -71,3 +71,28 @@ async def test_stock_tick_no_oculta_fallo_de_persistencia(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Base indisponible"):
         await sched._stock_tick()
+
+@pytest.mark.asyncio
+async def test_stock_tick_incremental_usa_job_15_sin_romper_reconciliacion(monkeypatch):
+    created = []
+
+    class Repo:
+        def __init__(self, db):
+            pass
+
+        def crear(self, **kwargs):
+            created.append(kwargs)
+            return SimpleNamespace(id=11)
+
+    sched = object.__new__(programador.IntegradorScheduler)
+    sched.settings = SimpleNamespace(
+        stock_sync_batch_size=50,
+        stock_sync_interval_minutes=5,
+        stock_incremental_enabled=True,
+    )
+    monkeypatch.setattr(programador, "SessionLocal", FakeSession)
+    monkeypatch.setattr(programador, "RepositorioTrabajosSincronizacion", Repo)
+    await sched._stock_tick()
+    assert created[0]["tipo"] == "STOCK_SYNC_INCREMENTAL"
+    assert created[0]["payload"] == {"batch_limit": 50}
+    assert "incremental" in created[0]["idempotency_key"]

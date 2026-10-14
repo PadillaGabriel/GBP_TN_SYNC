@@ -33,6 +33,7 @@ COMMANDS = {
     "IMPORTAR_PENDIENTES_TN": trabajos_masivos.ejecutar_job_importar_pendientes,
     "IMPORTAR_SKU_TN": trabajos_masivos.ejecutar_job_importar_sku,
     "STOCK_SYNC_LOTE": trabajos_masivos.ejecutar_job_stock_lote,
+    "STOCK_SYNC_INCREMENTAL": trabajos_masivos.ejecutar_job_stock_incremental,
     "STOCK_SYNC_SKU": trabajos_masivos.ejecutar_job_stock_sku,
     "NORMALIZAR_CATEGORIAS_TN": trabajos_masivos.ejecutar_job_normalizar_categorias,
     "REAUDITAR_BLOQUEADOS": trabajos_masivos.ejecutar_job_reauditar_decision,

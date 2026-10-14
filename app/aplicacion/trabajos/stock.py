@@ -119,3 +119,39 @@ async def ejecutar_job_stock_sku(
             error_codigo=type(exc).__name__,
             progreso={"mensaje": str(exc), "porcentaje": 100, "sku": sku},
         )
+
+
+async def ejecutar_job_stock_incremental(*, job_id: int, batch_limit: int = 100) -> None:
+    """Job durable de exportación 15: no modifica el job de reconciliación 14."""
+    settings = obtener_configuracion()
+    try:
+        with SessionLocal() as db:
+            RepositorioTrabajosSincronizacion(db).actualizar(
+                job_id, estado="EN_PROCESO", iniciar=True,
+                progreso={"mensaje": "Consultando movimientos de stock GBP (15).", "porcentaje": 5},
+            )
+            service = StockSyncService(settings=settings, db=db)
+
+            def informar(avance: dict[str, object]) -> None:
+                procesados = int(avance.get("procesados") or 0)
+                total = int(avance.get("total") or 0)
+                porcentaje = 5 if not total else 5 + int(90 * procesados / total)
+                _update_job(job_id, estado="EN_PROCESO", progreso={
+                    **avance, "porcentaje": min(95, porcentaje),
+                    "mensaje": f"Stock incremental {procesados}/{total}",
+                })
+
+            result = await service.sincronizar_incremental(limit=batch_limit, on_progress=informar)
+        _update_job(
+            job_id,
+            estado="FINALIZADO" if result["errores"] == 0 else "FINALIZADO_CON_ERRORES",
+            finalizar=True,
+            progreso={**result, "mensaje": "Stock incremental finalizado.", "porcentaje": 100},
+        )
+    except Exception as exc:
+        logger.exception("job_stock_incremental_failed", extra={"job_id": job_id})
+        _update_job(
+            job_id, estado="ERROR", finalizar=True,
+            error_codigo=type(exc).__name__,
+            progreso={"mensaje": str(exc), "porcentaje": 100},
+        )

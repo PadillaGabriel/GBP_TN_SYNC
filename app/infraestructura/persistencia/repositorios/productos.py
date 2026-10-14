@@ -102,7 +102,9 @@ class RepositorioProductos:
         model.validado_at = datetime.now(UTC)
         self.db.commit()
 
-    def guardar_stock(self, producto_id: int, stock: StockProducto) -> None:
+    def guardar_stock(
+        self, producto_id: int, stock: StockProducto, *, actualizar_publicable: bool = True
+    ) -> None:
         """Guarda stock disponible por deposito y stock publicable."""
 
         for deposito in stock.depositos:
@@ -122,9 +124,10 @@ class RepositorioProductos:
                 self.db.add(model)
             model.stock_disponible_gbp = deposito.stock_disponible
             model.stock_original_gbp = Decimal(str(deposito.stock_original))
-            model.stock_publicable_tn = (
-                stock.cantidad if deposito.usado_para_tienda_nube else None
-            )
+            if actualizar_publicable:
+                model.stock_publicable_tn = (
+                    stock.cantidad if deposito.usado_para_tienda_nube else None
+                )
             model.usado_para_tienda_nube = deposito.usado_para_tienda_nube
             model.ultima_consulta_gbp = datetime.now(UTC)
         self.db.commit()
@@ -569,6 +572,50 @@ class RepositorioProductos:
             }
             for row in rows
         ]
+
+    def listar_mapeos_activos_para_stock_por_item_ids(
+        self, item_ids: set[str], *, batch_size: int = 500
+    ) -> list[dict[str, object]]:
+        """Resuelve solamente artículos modificados que están publicados en Tiendanube."""
+        if not item_ids:
+            return []
+        resultados: list[dict[str, object]] = []
+        ordenados = sorted(item_ids)
+        for inicio in range(0, len(ordenados), batch_size):
+            bloque = ordenados[inicio : inicio + batch_size]
+            rows = self.db.execute(
+                select(
+                    ProductoFuenteModel.id,
+                    ProductoFuenteModel.sku,
+                    ProductoFuenteModel.id_sistema_gbp,
+                    ProductoTiendaNubeModel.tn_product_id,
+                    ProductoTiendaNubeModel.tn_variant_id,
+                    StockActualModel.stock_publicable_tn,
+                )
+                .join(ProductoTiendaNubeModel, ProductoTiendaNubeModel.sku == ProductoFuenteModel.sku)
+                .join(
+                    StockActualModel,
+                    (StockActualModel.producto_fuente_id == ProductoFuenteModel.id)
+                    & (StockActualModel.usado_para_tienda_nube.is_(True)),
+                    isouter=True,
+                )
+                .where(
+                    ProductoFuenteModel.id_sistema_gbp.in_(bloque),
+                    ProductoTiendaNubeModel.estado_publicacion.notin_(MAPEO_TN_ESTADOS_INACTIVOS),
+                )
+            ).all()
+            resultados.extend(
+                {
+                    "producto_fuente_id": row[0],
+                    "sku": row[1],
+                    "id_sistema_gbp": row[2],
+                    "tn_product_id": row[3],
+                    "tn_variant_id": row[4],
+                    "stock_publicable_tn": row[5],
+                }
+                for row in rows
+            )
+        return resultados
 
     def obtener_mapeo_activo_para_stock_por_sku(
         self, sku: str
