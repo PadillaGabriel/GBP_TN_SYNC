@@ -38,18 +38,23 @@ def _base_context(request: Request, seccion: str, titulo: str) -> dict[str, obje
 def inicio(request: Request, db: Session = Depends(obtener_sesion_bd)) -> HTMLResponse:
     productos = RepositorioProductos(db)
     jobs = RepositorioTrabajosSincronizacion(db)
-    auditoria = RepositorioAuditoriaSincronizacion(db)
-    resumen = productos.resumen_operativo_panel()
+    conteos = jobs.contar_por_estado()
+    recientes = jobs.listar_recientes(limit=12)
+    stock_jobs = {
+        "incremental": next((j for j in recientes if j["tipo"] == "STOCK_SYNC_INCREMENTAL"), None),
+        "completo": next((j for j in recientes if j["tipo"] == "STOCK_SYNC_LOTE"), None),
+    }
     context = _base_context(request, "inicio", "Centro de operaciones")
     context.update(
         {
-            "resumen": resumen,
-            "decisiones": productos.contar_por_decision(),
+            "resumen": productos.resumen_operativo_panel(),
+            "publicaciones_activas": productos.contar_publicaciones_activas_registradas(),
             "stock_sync": productos.resumen_stock_sync(),
-            "jobs_estado": jobs.contar_por_estado(),
-            "jobs_activos": jobs.listar_activos(limit=8),
-            "jobs_recientes": jobs.listar_recientes(limit=8),
-            "ultimo_evento": auditoria.obtener_ultimo_evento(),
+            "pendientes": conteos.get("PENDIENTE", 0),
+            "procesando": conteos.get("EN_PROCESO", 0) + conteos.get("CANCELACION_SOLICITADA", 0),
+            "errores": sum(conteos.get(e, 0) for e in ("ERROR", "FINALIZADO_CON_ERRORES", "REQUIERE_REVISION")),
+            "jobs_recientes": recientes[:5],
+            "stock_jobs": stock_jobs,
         }
     )
     return templates.TemplateResponse(request, "enterprise/dashboard.html", context)
@@ -153,6 +158,12 @@ def exportaciones(request: Request) -> HTMLResponse:
         {
             "exportaciones": [
                 {
+                    "id": settings.gbp_export_producto_por_item_id,
+                    "nombre": "TN_PRODUCTO_POR_ITEM",
+                    "uso": "Ficha interactiva dentro de GBP",
+                    "compatible_ws": False,
+                },
+                {
                     "id": settings.gbp_export_productos_general_id,
                     "nombre": "TN_PRODUCTOS_GENERAL",
                     "uso": "Catálogo completo y consulta por SKU",
@@ -167,13 +178,7 @@ def exportaciones(request: Request) -> HTMLResponse:
                 {
                     "id": settings.gbp_export_productos_stock_id,
                     "nombre": "TN_PRODUCTOS_STOCK",
-                    "uso": "Stock operativo completo",
-                    "compatible_ws": True,
-                },
-                {
-                    "id": settings.gbp_export_movimientos_stock_id,
-                    "nombre": "TN_MOVIMIENTOS_STOCK",
-                    "uso": "Artículos afectados en los últimos 15 minutos",
+                    "uso": "Stock operativo",
                     "compatible_ws": True,
                 },
             ]
