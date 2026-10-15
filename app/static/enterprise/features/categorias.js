@@ -61,7 +61,7 @@ function initializeDedupeActions() {
   queryAll("[data-category-dedupe]").forEach((button) => {
     button.addEventListener("click", async () => {
       const confirmWrite = button.dataset.categoryDedupe === "true";
-      if (confirmWrite && !window.confirm("Esto reasignará productos y eliminará categorías duplicadas en Tiendanube. ¿Continuar?")) return;
+      if (confirmWrite && !window.confirm("Confirmá solo después de revisar el diagnóstico en Trabajos. Esta operación reasignará productos y eliminará categorías duplicadas vacías en Tiendanube. ¿Ejecutar?")) return;
       setButtonBusy(button, true, confirmWrite ? "Iniciando…" : "Diagnosticando…");
       try {
         const result = await request(`/admin/panel/categorias/normalizar-duplicadas?confirm=${confirmWrite}`, { method: "POST" });
@@ -81,4 +81,64 @@ export function initializeCategories() {
   initializeAliasForm();
   initializeDeleteActions();
   initializeDedupeActions();
+  initializeCategoryDashboard();
+}
+
+function initializeCategoryDashboard() {
+  const rows = queryAll('[data-category-row]');
+  const search = query('#categorySearch');
+  const type = query('#categoryFilterType');
+  const counter = query('#categoryTableCount');
+  const label = query('#categoryPageLabel');
+  const previous = query('#categoryPrev');
+  const next = query('#categoryNext');
+  const empty = query('#categoryNoResults');
+  if (!search || !type || !counter) return;
+  let page = 0;
+  const size = 10;
+  function render() {
+    const term = search.value.trim().toLocaleLowerCase('es');
+    const visible = rows.filter((row) => (!type.value || row.dataset.categoryType === type.value)
+      && (row.dataset.categorySearch || '').includes(term));
+    const pages = Math.max(1, Math.ceil(visible.length / size));
+    page = Math.min(page, pages - 1);
+    rows.forEach((row) => { row.hidden = true; });
+    visible.slice(page * size, (page + 1) * size).forEach((row) => { row.hidden = false; });
+    counter.textContent = `${visible.length} equivalencia${visible.length === 1 ? '' : 's'} encontrada${visible.length === 1 ? '' : 's'}`;
+    label.textContent = `Página ${page + 1} de ${pages}`;
+    previous.disabled = page === 0;
+    next.disabled = page >= pages - 1;
+    empty.hidden = visible.length !== 0 || rows.length === 0;
+  }
+  search.addEventListener('input', () => { page = 0; render(); });
+  type.addEventListener('change', () => { page = 0; render(); });
+  query('#categoryClearFilters')?.addEventListener('click', () => { search.value = ''; type.value = ''; page = 0; render(); });
+  previous.addEventListener('click', () => { page--; render(); });
+  next.addEventListener('click', () => { page++; render(); });
+  render();
+
+  const dialog = query('#categoryAliasDialog');
+  const form = query('#categoryAliasForm');
+  const heading = query('#categoryDialogTitle');
+  if (!dialog || !form) return;
+  const open = (button) => {
+    form.reset();
+    query('#categoryType').value = button?.dataset.tipo || 'categoria';
+    query('#categoryOrigin').value = button?.dataset.origen || '';
+    query('#categoryCanonical').value = button?.dataset.canonico || '';
+    query('#categoryParent').value = button?.dataset.padre || '';
+    query('#categoryObservation').value = button?.dataset.observacion || '';
+    heading.textContent = button ? 'Editar equivalencia' : 'Nueva equivalencia';
+    query('#categoryType').dispatchEvent(new Event('change'));
+    dialog.showModal();
+  };
+  query('#categoryNewAlias')?.addEventListener('click', () => open(null));
+  queryAll('[data-category-alias-edit]').forEach((button) => button.addEventListener('click', () => open(button)));
+  const close = () => dialog.close();
+  query('#categoryCloseDialog')?.addEventListener('click', close);
+  query('#categoryCancelDialog')?.addEventListener('click', close);
+  dialog.addEventListener('click', (event) => { if (event.target === dialog) close(); });
+  query('#categoryPrimaryAction')?.addEventListener('click', () => {
+    query('#categoryWorkflow')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
 }

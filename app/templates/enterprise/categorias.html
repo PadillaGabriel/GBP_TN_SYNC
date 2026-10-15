@@ -1,46 +1,51 @@
 {% extends "enterprise/base.html" %}{% block content %}
-<section class="hero compact-hero">
-  <div><span class="eyebrow">TAXONOMÍA COMERCIAL</span><h2>Diccionario de categorías GBP → Tiendanube</h2><p class="lead">Definí una única categoría canónica sin alterar el dato fuente de GBP. Las próximas importaciones resolverán primero este diccionario y recién después buscarán o crearán categorías en Tiendanube.</p></div>
-  <div class="metric"><span>Equivalencias</span><strong>{{ total_aliases }}</strong><small>Persistidas en PostgreSQL</small></div>
+<section class="section-intro category-intro">
+  <div><span class="eyebrow">TAXONOMÍA COMERCIAL</span><h2>Categorías</h2>
+    <p>Gestioná las equivalencias de nombres de GBP y revisá duplicados de Tiendanube antes de realizar modificaciones.</p></div>
+  <button type="button" class="btn primary large" id="categoryPrimaryAction">Normalizar y sincronizar</button>
 </section>
-
-<div class="layout-2 category-layout">
-  <section class="card">
-    <div class="card-head"><div><span class="eyebrow">NUEVA EQUIVALENCIA</span><h3>Normalizar un nombre</h3></div></div>
-    <form id="categoryAliasForm" class="form-stack">
-      <label>Tipo<select id="categoryType" name="tipo"><option value="categoria">Categoría</option><option value="subcategoria">Subcategoría</option></select></label>
-      <label>Valor recibido desde GBP<input name="valor_origen" id="categoryOrigin" list="gbpCategoryOrigins" required placeholder="Ej. COCINA Y ACCESORIOS"></label>
-      <label>Nombre canónico<input name="valor_canonico" required placeholder="Ej. Cocina"></label>
-      <label id="categoryParentField" hidden>Categoría padre canónica<input name="categoria_padre_canonica" list="canonicalParents" placeholder="Ej. Cocina"></label>
-      <label>Observación <span class="muted">(opcional)</span><input name="observacion" placeholder="Motivo o criterio comercial"></label>
-      <button class="btn primary" type="submit">Guardar equivalencia</button>
-    </form>
-    <datalist id="gbpCategoryOrigins">{% for item in origenes.categorias %}<option value="{{ item.valor }}">{{ item.productos }} productos</option>{% endfor %}</datalist>
-    <datalist id="canonicalParents">{% for item in origenes.categorias %}<option value="{{ item.valor }}">{% endfor %}</datalist>
-    <datalist id="gbpSubcategoryOrigins">{% for item in origenes.subcategorias %}<option value="{{ item.valor }}">{{ item.categoria }} · {{ item.productos }} productos</option>{% endfor %}</datalist>
-  </section>
-
-  <section class="card">
-    <div class="card-head"><div><span class="eyebrow">TIENDANUBE</span><h3>Limpiar duplicados existentes</h3></div></div>
-    <div class="callout warning"><strong>Primero diagnosticá.</strong><p>El diagnóstico no escribe. La ejecución real reasigna productos a IDs canónicos y elimina categorías duplicadas vacías. También respeta las equivalencias comerciales definidas en esta pantalla.</p></div>
-    <div class="button-stack">
-      <button class="btn" type="button" data-category-dedupe="false">Diagnosticar duplicados</button>
-      <button class="btn danger-outline" type="button" data-category-dedupe="true">Normalizar Tiendanube</button>
-    </div>
-  </section>
-</div>
-
-<section class="card table-card">
-  <div class="table-toolbar"><div><strong>Equivalencias activas</strong><div class="muted">La fuente GBP se conserva; este diccionario solo decide el nombre comercial usado al publicar.</div></div></div>
-  <div class="table-wrap"><table class="category-table"><thead><tr><th>Tipo</th><th>Origen GBP</th><th>Canónica</th><th>Padre</th><th>Observación</th><th></th></tr></thead><tbody>
-  {% for item in aliases %}<tr>
-    <td><span class="badge neutral">{{ item.tipo }}</span></td>
-    <td><strong>{{ item.valor_origen }}</strong></td>
-    <td><strong>{{ item.valor_canonico }}</strong></td>
-    <td>{{ item.categoria_padre_canonica or '—' }}</td>
-    <td class="wrap-cell">{{ item.observacion or '—' }}</td>
-    <td class="actions-cell"><button class="more-btn danger-text" type="button" data-category-alias-delete="{{ item.id }}" title="Eliminar equivalencia">×</button></td>
-  </tr>{% else %}<tr><td colspan="6" class="empty">Todavía no hay equivalencias comerciales. La normalización técnica de acentos, espacios y mayúsculas sigue activa.</td></tr>{% endfor %}
+<section class="category-stats" aria-label="Resumen de categorías">
+  <article class="card category-stat"><span class="category-stat-icon" aria-hidden="true">▤</span><div><span class="muted">Categorías GBP registradas</span><strong>{{ total_categorias }}</strong><small>En productos importados localmente</small></div></article>
+  <article class="card category-stat"><span class="category-stat-icon category-stat-icon--green" aria-hidden="true">◇</span><div><span class="muted">Equivalencias guardadas</span><strong>{{ total_aliases }}</strong><small>Diccionario comercial de PostgreSQL</small></div></article>
+  <article class="card category-stat"><span class="category-stat-icon category-stat-icon--amber" aria-hidden="true">◷</span><div><span class="muted">Subcategorías GBP</span><strong>{{ total_subcategorias }}</strong><small>En productos importados localmente</small></div></article>
+  <article class="card category-stat"><span class="category-stat-icon category-stat-icon--red" aria-hidden="true">!</span><div><span class="muted">Conflictos en Tiendanube</span><strong>—</strong><small>Se obtienen al diagnosticar</small></div></article>
+</section>
+<section class="card category-manager">
+  <div class="category-manager-head"><div><h3>Diccionario de equivalencias</h3><p class="muted">Los cambios se aplican a las próximas importaciones. No alteran los nombres originales en GBP.</p></div><button class="btn" type="button" id="categoryNewAlias">+ Nueva equivalencia</button></div>
+  <div class="category-filter-row">
+    <label class="category-search"><span class="sr-only">Buscar equivalencia</span><input type="search" id="categorySearch" placeholder="Buscar categoría GBP, nombre canónico o padre…"></label>
+    <label>Tipo<select id="categoryFilterType"><option value="">Todas</option><option value="categoria">Categorías</option><option value="subcategoria">Subcategorías</option></select></label>
+    <button type="button" class="btn" id="categoryClearFilters">Limpiar filtros</button>
+  </div>
+  <p class="muted category-table-count" id="categoryTableCount" role="status"></p>
+  <div class="table-wrap"><table class="category-table"><thead><tr><th scope="col">Tipo</th><th scope="col">Origen GBP</th><th scope="col">Nombre canónico</th><th scope="col">Categoría padre</th><th scope="col">Observación</th><th scope="col">Acción</th></tr></thead><tbody>
+  {% for item in aliases %}<tr data-category-row data-category-type="{{ item.tipo }}" data-category-search="{{ ((item.valor_origen or '') ~ ' ' ~ (item.valor_canonico or '') ~ ' ' ~ (item.categoria_padre_canonica or '') ~ ' ' ~ (item.observacion or ''))|lower|e }}">
+    <td><span class="badge neutral">{{ 'Subcategoría' if item.tipo == 'subcategoria' else 'Categoría' }}</span></td>
+    <td><strong>{{ item.valor_origen }}</strong></td><td><strong>{{ item.valor_canonico }}</strong></td>
+    <td>{{ item.categoria_padre_canonica or '—' }}</td><td class="wrap-cell">{{ item.observacion or '—' }}</td>
+    <td class="actions-cell"><button class="btn category-small-button" type="button" data-category-alias-edit data-id="{{ item.id }}" data-tipo="{{ item.tipo }}" data-origen="{{ item.valor_origen|e }}" data-canonico="{{ item.valor_canonico|e }}" data-padre="{{ (item.categoria_padre_canonica or '')|e }}" data-observacion="{{ (item.observacion or '')|e }}">Editar</button><button class="btn category-small-button danger-text" type="button" data-category-alias-delete="{{ item.id }}">Eliminar</button></td>
+  </tr>{% else %}<tr data-category-empty><td colspan="6" class="empty">Todavía no hay equivalencias guardadas.</td></tr>{% endfor %}
   </tbody></table></div>
+  <p id="categoryNoResults" class="empty" hidden>No hay equivalencias que coincidan con la búsqueda.</p>
+  <div class="category-pagination"><button type="button" class="btn" id="categoryPrev">Anterior</button><span class="muted" id="categoryPageLabel"></span><button type="button" class="btn" id="categoryNext">Siguiente</button></div>
 </section>
+<section class="card category-workflow" id="categoryWorkflow">
+  <div><span class="eyebrow">TIENDANUBE</span><h3>Normalización y sincronización</h3><p class="muted">El diagnóstico consulta categorías de Tiendanube sin modificar datos. Para aplicar cambios se requiere una confirmación independiente.</p></div>
+  <div class="category-workflow-actions"><button class="btn primary" type="button" data-category-dedupe="false">1. Diagnosticar duplicados</button><a class="btn" href="/admin/panel/trabajos">2. Revisar diagnóstico en Trabajos</a><button class="btn danger-outline" type="button" data-category-dedupe="true">3. Confirmar normalización</button></div>
+  <p class="muted">La ejecución confirmada puede reasignar productos y eliminar categorías duplicadas vacías. No se ejecuta automáticamente después del diagnóstico.</p>
+</section>
+<dialog id="categoryAliasDialog" class="category-dialog" aria-labelledby="categoryDialogTitle">
+  <form id="categoryAliasForm" class="form-stack">
+    <div class="category-dialog-heading"><h3 id="categoryDialogTitle">Nueva equivalencia</h3><button class="icon-btn" type="button" id="categoryCloseDialog" aria-label="Cerrar">×</button></div>
+    <label>Tipo<select id="categoryType" name="tipo"><option value="categoria">Categoría</option><option value="subcategoria">Subcategoría</option></select></label>
+    <label>Valor recibido desde GBP<input name="valor_origen" id="categoryOrigin" list="gbpCategoryOrigins" required placeholder="Ej. COCINA Y ACCESORIOS"></label>
+    <label>Nombre canónico<input name="valor_canonico" id="categoryCanonical" required placeholder="Ej. Cocina"></label>
+    <label id="categoryParentField" hidden>Categoría padre canónica<input name="categoria_padre_canonica" id="categoryParent" list="canonicalParents"></label>
+    <label>Observación (opcional)<input name="observacion" id="categoryObservation"></label>
+    <div class="category-dialog-actions"><button class="btn" type="button" id="categoryCancelDialog">Cancelar</button><button class="btn primary" type="submit">Guardar equivalencia</button></div>
+  </form>
+</dialog>
+<datalist id="gbpCategoryOrigins">{% for item in origenes.categorias %}<option value="{{ item.valor }}">{{ item.productos }} productos</option>{% endfor %}</datalist>
+<datalist id="canonicalParents">{% for item in origenes.categorias %}<option value="{{ item.valor }}">{% endfor %}</datalist>
+<datalist id="gbpSubcategoryOrigins">{% for item in origenes.subcategorias %}<option value="{{ item.valor }}">{{ item.categoria }} · {{ item.productos }} productos</option>{% endfor %}</datalist>
 {% endblock %}

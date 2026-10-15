@@ -38,23 +38,18 @@ def _base_context(request: Request, seccion: str, titulo: str) -> dict[str, obje
 def inicio(request: Request, db: Session = Depends(obtener_sesion_bd)) -> HTMLResponse:
     productos = RepositorioProductos(db)
     jobs = RepositorioTrabajosSincronizacion(db)
-    conteos = jobs.contar_por_estado()
-    recientes = jobs.listar_recientes(limit=12)
-    stock_jobs = {
-        "incremental": next((j for j in recientes if j["tipo"] == "STOCK_SYNC_INCREMENTAL"), None),
-        "completo": next((j for j in recientes if j["tipo"] == "STOCK_SYNC_LOTE"), None),
-    }
+    auditoria = RepositorioAuditoriaSincronizacion(db)
+    resumen = productos.resumen_operativo_panel()
     context = _base_context(request, "inicio", "Centro de operaciones")
     context.update(
         {
-            "resumen": productos.resumen_operativo_panel(),
-            "publicaciones_activas": productos.contar_publicaciones_activas_registradas(),
+            "resumen": resumen,
+            "decisiones": productos.contar_por_decision(),
             "stock_sync": productos.resumen_stock_sync(),
-            "pendientes": conteos.get("PENDIENTE", 0),
-            "procesando": conteos.get("EN_PROCESO", 0) + conteos.get("CANCELACION_SOLICITADA", 0),
-            "errores": sum(conteos.get(e, 0) for e in ("ERROR", "FINALIZADO_CON_ERRORES", "REQUIERE_REVISION")),
-            "jobs_recientes": recientes[:5],
-            "stock_jobs": stock_jobs,
+            "jobs_estado": jobs.contar_por_estado(),
+            "jobs_activos": jobs.listar_activos(limit=8),
+            "jobs_recientes": jobs.listar_recientes(limit=8),
+            "ultimo_evento": auditoria.obtener_ultimo_evento(),
         }
     )
     return templates.TemplateResponse(request, "enterprise/dashboard.html", context)
@@ -128,11 +123,25 @@ def categorias(
 ) -> HTMLResponse:
     repo = RepositorioNormalizacionCategorias(db)
     context = _base_context(request, "categorias", "Normalización de categorías")
+    origenes = repo.origenes_gbp()
+    aliases = repo.listar()
+    # Estos indicadores representan el diccionario local, no vínculos verificados en Tiendanube.
+    origenes_unicos = {
+        ("categoria", item["valor"].strip().casefold(), "")
+        for item in origenes["categorias"]
+    }
+    origenes_unicos.update(
+        ("subcategoria", item["valor"].strip().casefold(), item["categoria"].strip().casefold())
+        for item in origenes["subcategorias"]
+    )
     context.update(
         {
-            "aliases": repo.listar(),
-            "origenes": repo.origenes_gbp(),
+            "aliases": aliases,
+            "origenes": origenes,
             "total_aliases": repo.contar(),
+            "total_origenes": len(origenes_unicos),
+            "total_categorias": len(origenes["categorias"]),
+            "total_subcategorias": len(origenes["subcategorias"]),
         }
     )
     return templates.TemplateResponse(request, "enterprise/categorias.html", context)
