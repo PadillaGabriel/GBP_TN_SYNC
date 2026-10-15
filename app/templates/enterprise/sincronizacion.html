@@ -26,7 +26,10 @@
     <div class="card-head"><div><span class="eyebrow">ARTÍCULO</span><h3>Sincronización individual</h3></div></div>
     <form class="form-stack job-form" action="/admin/panel/stock/run-sku" method="post" data-job-form>
       <label>SKU<input name="sku" required placeholder="Ej. 8082"></label>
-      <button class="btn large">Actualizar un SKU</button>
+      <p>Elegí qué información actualizar para este SKU. La sincronización integral reutiliza el importador de productos (GBP → Tiendanube) y puede modificar su ficha comercial.</p>
+      <button type="submit" class="btn large" formaction="/admin/panel/stock/run-sku">Actualizar solo stock</button>
+      <button type="submit" class="btn primary large" formaction="/admin/panel/importar-sku" data-confirm-full="true">Sincronizar artículo completo</button>
+      <small>La actualización integral puede crear el producto si no existe en Tiendanube. DRY_RUN del WORKER sigue teniendo prioridad.</small>
     </form>
   </section>
 </div>

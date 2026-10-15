@@ -142,15 +142,15 @@ async function refreshJobs({ silent = true, scheduleNext = true } = {}) {
     if (scheduleNext) scheduleNextPoll(nextDelay);
   }
 }
-function prepareFormRequest(form) {
+function prepareFormRequest(form, submitter = null) {
   const method = String(form.method || "POST").toUpperCase();
-  const url = new URL(form.action, window.location.origin);
+  const url = new URL(submitter?.formAction || form.action, window.location.origin);
   const data = new FormData(form);
   if (method === "GET") {
     for (const [key, value] of data.entries()) url.searchParams.set(key, String(value));
     return { url: url.toString(), options: { method } };
   }
-  if (form.enctype.includes("multipart/form-data") || form.action.endsWith("/panel/importar-sku") || url.pathname.endsWith("/panel/stock/run-sku")) {
+  if (form.enctype.includes("multipart/form-data") || url.pathname.endsWith("/panel/importar-sku") || url.pathname.endsWith("/panel/stock/run-sku")) {
     return { url: url.toString(), options: { method, body: data } };
   }
   for (const [key, value] of data.entries()) url.searchParams.set(key, String(value));
@@ -160,10 +160,11 @@ function initializeJobForms() {
   queryAll("[data-job-form]").forEach((form) => {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const button = form.querySelector('button[type="submit"], button:not([type])');
+      const button = event.submitter || form.querySelector('button[type="submit"], button:not([type])');
+      if (button?.dataset.confirmFull === "true" && !window.confirm("¿Sincronizar la ficha comercial completa desde GBP a Tiendanube? Se podrán crear o actualizar nombre, precio, stock, descripción y otros datos gestionados por el importador.")) return;
       setButtonBusy(button, true, "Encolando…");
       try {
-        const { url, options } = prepareFormRequest(form);
+        const { url, options } = prepareFormRequest(form, button);
         const result = await request(url, options);
         if (result?.ok === false) throw new Error(result.error || result.detalle || "No se pudo iniciar.");
         toast(result?.job_id ? `Trabajo #${result.job_id} registrado en la cola.` : "Solicitud registrada.", "success");
