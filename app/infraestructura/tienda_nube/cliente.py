@@ -201,6 +201,23 @@ class ClienteTiendaNube:
             self._raise_for_status(response, request_payload=payload)
             return response.json()
 
+    async def create_product_image(
+        self, product_id: str, source_url: str
+    ) -> dict[str, Any]:
+        """Agrega una imagen por URL a un producto ya existente.
+
+        Las imágenes no se envían en PUT /products/{id}: Tiendanube dispone
+        de un recurso independiente para crearlas.
+        """
+        url = f"{self.base_url}/{self.store_id}/products/{product_id}/images"
+        payload = {"src": source_url}
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await self._request_with_retries(
+                client, "POST", url, headers=self.headers, json=payload
+            )
+            self._raise_for_status(response, request_payload=payload)
+            return response.json()
+
     async def create_variant(
         self, product_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:

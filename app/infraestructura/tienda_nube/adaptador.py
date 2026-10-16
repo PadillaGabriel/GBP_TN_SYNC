@@ -31,7 +31,7 @@ class AdaptadorTiendaNube(PublicadorComercioElectronico):
     La actualización se divide por recurso:
     - producto: nombre, descripción, categorías, publicación;
     - variante: SKU, precio, stock, barcode;
-    - imágenes: solo en creación para evitar duplicados y 422 en updates.
+    - imágenes: en creación o reparación de publicaciones sin imágenes.
     """
 
     _category_lock = asyncio.Lock()
@@ -114,6 +114,9 @@ class AdaptadorTiendaNube(PublicadorComercioElectronico):
             )
             variant_action = "crear_variante"
 
+        imagenes_agregadas = await self._completar_imagenes_faltantes(
+            producto, product_id=product_id, existente=existing
+        )
         tn_product = self._merge_product_with_variant(
             updated_product or existing, updated_variant
         )
@@ -129,9 +132,40 @@ class AdaptadorTiendaNube(PublicadorComercioElectronico):
                 "product_payload": product_payload,
                 "variant_payload": variant_payload,
                 "variant_action": variant_action,
+                "imagenes_agregadas": imagenes_agregadas,
                 "advertencias": advertencias,
             },
         )
+
+    async def _completar_imagenes_faltantes(
+        self, producto: Producto, *, product_id: str, existente: dict[str, Any]
+    ) -> int:
+        """Repara publicaciones sin imágenes; nunca reemplaza una galería existente.
+
+        Consulta de nuevo Tiendanube antes de escribir para evitar duplicados al
+        reejecutar una importación. Si la API no informa `images`, se omite la
+        reparación por seguridad. Los datos de GBP no autorizan borrar imágenes.
+        """
+        fuentes = list(dict.fromkeys(
+            self.builder._build_image_url(str(imagen.url))
+            for imagen in sorted(producto.imagenes, key=lambda i: i.orden)
+            if imagen.url and str(imagen.url).strip()
+        ))
+        if not fuentes:
+            return 0
+        actual = await self.client.get_product(product_id)
+        if not isinstance(actual, dict) or "images" not in actual:
+            logger.warning("tn_images_not_present_in_response", extra={"product_id": product_id})
+            return 0
+        imagenes_tn = actual["images"]
+        if not isinstance(imagenes_tn, list):
+            logger.warning("tn_images_invalid_response", extra={"product_id": product_id})
+            return 0
+        if imagenes_tn:
+            return 0
+        for fuente in fuentes:
+            await self.client.create_product_image(product_id, fuente)
+        return len(fuentes)
 
     async def actualizar_stock(self, stock: StockProducto) -> SyncResult:
         """Actualiza únicamente stock en Tienda Nube."""
