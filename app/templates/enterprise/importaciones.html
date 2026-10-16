@@ -1,6 +1,42 @@
 {% extends "enterprise/base.html" %}{% block content %}
-<div class="layout-2 import-layout"><section class="card"><div class="card-head"><div><span class="eyebrow">OPERACIÓN INDIVIDUAL</span><h3>Importar o actualizar un producto</h3></div></div><p class="lead">Consultá el artículo en GBP, validá su ficha y ejecutá la publicación controlada en Tiendanube.</p><form class="form-stack job-form" action="/admin/panel/importar-sku" method="post" data-job-form><label>SKU del artículo<input name="sku" required placeholder="Ej. 8082"></label><label class="check"><input type="checkbox" name="forzar" value="true"><span>Forzar aun cuando existan bloqueos de validación</span></label><button class="btn primary large" type="submit">Preparar importación</button></form></section>
-<section class="card"><div class="card-head"><div><span class="eyebrow">OPERACIÓN MASIVA</span><h3>Reimportación general</h3></div></div><p class="lead">Procesa el catálogo auditado con seguimiento, lotes controlados y trazabilidad por producto.</p><form class="form-stack job-form" action="/admin/panel/jobs/importar-todo" method="post" data-job-form><label>Tamaño de lote<input type="number" name="batch_limit" min="1" max="200" value="50"></label><div class="callout warning"><strong>Operación de alto impacto</strong><p>La ejecución respeta idempotencia y solo crea o actualiza cuando corresponde.</p></div><button class="btn primary large" type="submit">Iniciar reimportación masiva</button></form></section></div>
-<div class="metric-grid compact"><article class="metric"><span>Publicables</span><strong>{{ resumen.publicables_total }}</strong></article><article class="metric"><span>Pendientes</span><strong>{{ resumen.publicables_pendientes_importar }}</strong></article><article class="metric danger"><span>Bloqueados</span><strong>{{ resumen.bloqueados_total }}</strong></article><article class="metric"><span>Ya vinculados</span><strong>{{ resumen.productos_mapeados_tienda_nube }}</strong></article></div>
-<section class="card"><div class="card-head"><div><span class="eyebrow">FLUJO CONTROLADO</span><h3>Qué ocurre durante una importación</h3></div></div><div class="steps"><div><b>1</b><strong>Consulta GBP</strong><span>Lee las exportaciones configuradas.</span></div><div><b>2</b><strong>Validación</strong><span>Clasifica bloqueos y requisitos.</span></div><div><b>3</b><strong>Comparación</strong><span>Detecta si debe crear o actualizar.</span></div><div><b>4</b><strong>Ejecución</strong><span>Publica con auditoría e idempotencia.</span></div></div></section>
+<div class="imp-page">
+  <header class="imp-heading"><div><h2>Importación y publicación</h2><p>Creá o actualizá publicaciones a partir de Global Blue Point.</p></div></header>
+  <section class="imp-metrics" aria-label="Estado del catálogo">
+    <article class="imp-stat"><span>Publicables en GBP</span><strong>{{ resumen.publicables_total }}</strong></article>
+    <article class="imp-stat"><span>Pendientes de importar</span><strong>{{ resumen.publicables_pendientes_importar }}</strong></article>
+    <article class="imp-stat"><span>Vinculados a Tiendanube</span><strong>{{ resumen.productos_mapeados_tienda_nube }}</strong></article>
+    <article class="imp-stat"><span>Con bloqueos</span><strong>{{ resumen.bloqueados_total }}</strong></article>
+  </section>
+  <div class="imp-operations">
+    <section class="card imp-panel" aria-labelledby="imp-individual-title">
+      <div class="imp-panel-heading"><span class="imp-panel-symbol" aria-hidden="true">▣</span><div><h3 id="imp-individual-title">Artículo individual</h3><p>Consultá la ficha y luego decidí si publicarla.</p></div></div>
+      <form class="imp-form" id="impIndividualForm" action="/admin/panel/importar-sku" method="post" data-job-form>
+        <label for="impSku">Código del artículo (SKU)</label>
+        <input id="impSku" name="sku" type="text" required autocomplete="off" placeholder="Ej.: ABC123, 3556-A, TN2026X" spellcheck="false">
+        <div class="imp-individual-actions">
+          <button class="btn" id="impPreviewButton" type="button">Consultar artículo</button>
+          <button class="btn primary" id="impPublishButton" type="submit" disabled>Importar / actualizar</button>
+        </div>
+        <label class="imp-check"><input type="checkbox" name="forzar" value="true"><span>Forzar bloqueos de validación</span></label>
+      </form>
+    </section>
+    <section class="card imp-panel" aria-labelledby="imp-bulk-title">
+      <div class="imp-panel-heading"><span class="imp-panel-symbol" aria-hidden="true">▤</span><div><h3 id="imp-bulk-title">Importación masiva</h3><p>Procesá el catálogo mediante trabajos controlados.</p></div></div>
+      <form class="imp-form" action="/admin/panel/jobs/importar-todo" method="post" data-job-form data-confirm-import-all="true">
+        <label for="impBatch">Artículos por lote</label>
+        <select id="impBatch" name="batch_limit"><option value="25">25</option><option value="50" selected>50</option><option value="100">100</option><option value="200">200</option></select>
+        <p class="imp-note">Reimportación general con validaciones e idempotencia. Podés seguir el progreso en Trabajos.</p>
+        <button class="btn primary" type="submit">Iniciar importación masiva</button>
+      </form>
+    </section>
+  </div>
+  <section class="card imp-preview" aria-labelledby="imp-preview-title">
+    <div class="imp-section-header"><h3 id="imp-preview-title">Vista previa del artículo</h3><span id="impPreviewStatus" class="imp-preview-status" role="status">Sin consultar</span></div>
+    <div id="impPreviewBody" aria-live="polite"><p class="imp-empty">Ingresá un SKU y elegí «Consultar artículo» para ver los datos de GBP.</p></div>
+  </section>
+  <section class="card imp-history" aria-labelledby="imp-history-title">
+    <div class="imp-section-header"><h3 id="imp-history-title">Últimas importaciones</h3><a class="btn" href="/admin/panel/trabajos">Ver todos los trabajos ↗</a></div>
+    <div class="imp-table-wrap"><table class="imp-table"><thead><tr><th>Trabajo</th><th>Tipo</th><th>Artículo / lote</th><th>Estado</th><th>Fecha</th><th></th></tr></thead><tbody id="impRecentJobs"><tr><td colspan="6" class="imp-empty">Cargando importaciones…</td></tr></tbody></table></div>
+  </section>
+</div>
 {% endblock %}

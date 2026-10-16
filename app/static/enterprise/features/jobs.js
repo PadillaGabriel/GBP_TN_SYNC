@@ -159,6 +159,7 @@ function prepareFormRequest(form, submitter = null) {
 function initializeJobForms() {
   queryAll("[data-job-form]").forEach((form) => {
     form.addEventListener("submit", async (event) => {
+      if (event.defaultPrevented) return;
       event.preventDefault();
       const button = event.submitter || form.querySelector('button[type="submit"], button:not([type])');
       if (button?.dataset.confirmFull === "true" && !window.confirm("¿Sincronizar la ficha comercial completa desde GBP a Tiendanube? Se podrán crear o actualizar nombre, precio, stock, descripción y otros datos gestionados por el importador.")) return;

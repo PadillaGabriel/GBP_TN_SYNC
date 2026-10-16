@@ -1,5 +1,6 @@
 import { initializeCategories } from "./features/categorias.js";
 import { initializeExports } from "./features/exportaciones.js";
+import { initializeImportaciones } from "./features/importaciones.js";
 import { initializeJobs } from "./features/jobs.js";
 import { initializeNavigation, initializeTheme } from "./features/navigation.js";
 import { initializeOrders } from "./features/pedidos.js";
@@ -11,6 +12,7 @@ function initialize() {
   initializeTheme();
   initializeTableSearch();
   initializeJobs();
+  initializeImportaciones();
   initializeExports();
   initializeOrders();
   initializeProductActions();
