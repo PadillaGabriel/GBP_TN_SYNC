@@ -1,3 +1,4 @@
+import { initializeSyncControls } from "./features/sync-controls.js";
 import { initializeCategories } from "./features/categorias.js";
 import { initializeExports } from "./features/exportaciones.js";
 import { initializeImportaciones } from "./features/importaciones.js";
@@ -17,6 +18,7 @@ function initialize() {
   initializeOrders();
   initializeProductActions();
   initializeCategories();
+  initializeSyncControls();
 }
 
 if (document.readyState === "loading") {
