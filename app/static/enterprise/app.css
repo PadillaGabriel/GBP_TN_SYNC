@@ -669,4 +669,42 @@ tbody tr:hover td { background: var(--surface-2); }
   .sync-mode { grid-template-columns: 1fr; }
   .sync-history table { min-width: 690px; }
 }
-@media(max-width:1350px){.sync-operation-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.sync-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:900px){.sync-operation-grid{grid-template-columns:minmax(0,1fr)}.sync-operation{min-height:0}.sync-reconcile{flex-direction:column;align-items:stretch}.sync-reconcile .form-inline{min-width:0}.sync-intro{align-items:flex-start;flex-direction:column}}@media(max-width:570px){.sync-metrics{grid-template-columns:minmax(0,1fr)}.sync-reconcile .form-inline{flex-direction:column;align-items:stretch}.sync-mode{grid-template-columns:1fr}.sync-history table{min-width:690px}}
+
+
+/* Sync UI v3: optical balance and compact operational density. */
+.sync-page .sync-intro { margin-bottom: 18px; }
+.sync-page .sync-shortcuts .btn { min-height: 38px; }
+.sync-page .sync-metrics { gap: 14px; margin-bottom: 16px; }
+.sync-page .sync-metric { min-height: 116px; padding: 16px 17px; gap: 14px; }
+.sync-page .sync-metric-icon { width: 46px; height: 46px; border-radius: 11px; font-size: 25px; }
+.sync-page .sync-metric strong { margin: 5px 0 4px; }
+.sync-page .sync-metric strong.sync-date { font-size: clamp(16px, 1.35vw, 19px); line-height: 1.3; overflow-wrap: normal; word-break: normal; }
+.sync-page .sync-operation-grid { gap: 14px; margin-bottom: 16px; }
+.sync-page .sync-operation { min-height: 315px; padding: 20px; }
+.sync-page .sync-operation-head { gap: 12px; margin-bottom: 16px; }
+.sync-page .sync-operation h2 { font-size: 16px; margin-bottom: 6px; }
+.sync-page .sync-operation-body { gap: 12px; }
+.sync-page .sync-info { padding: 12px 14px; }
+.sync-page .sync-mode label { min-height: 52px; }
+.sync-page .sync-footnote { margin-top: 9px; }
+.sync-page .sync-reconcile { padding: 17px 21px; margin-bottom: 16px; }
+.sync-page .sync-reconcile h2 { margin-bottom: 3px; }
+.sync-page .sync-history { padding: 18px 20px; }
+.sync-page .sync-history th, .sync-page .sync-history td { padding: 9px 11px; }
+.sync-page .sync-history .card-head { margin-bottom: 12px; }
+.sync-page .sync-history td .progress { min-width: 86px; }
+.sync-page .sync-history .btn.subtle { min-height: 32px; padding: 5px 11px; }
+@media (max-width: 1350px) {
+  .sync-page .sync-operation { min-height: 315px; }
+}
+@media (max-width: 900px) {
+  .sync-page .sync-operation { min-height: unset; }
+  .sync-page .sync-reconcile { align-items: stretch; }
+}
+@media (max-width: 570px) {
+  .sync-page .sync-metric { min-height: 100px; }
+  .sync-page .sync-operation { padding: 18px; }
+  .sync-page .sync-history { padding: 15px 12px; }
+  .sync-page .sync-shortcuts { width: 100%; }
+  .sync-page .sync-shortcuts .btn { flex: 1; }
+}

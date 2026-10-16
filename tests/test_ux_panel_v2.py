@@ -142,3 +142,16 @@ def test_sin_modulos_ui_muertos_ni_fuentes_remotas():
     assert not (base / "features/confirmations.js").exists()
     assert "fonts.googleapis.com" not in style
     assert "prefers-reduced-motion" in style
+
+
+def test_sincronizacion_fecha_legible_y_detalle_local():
+    root = Path(__file__).resolve().parents[1]
+    template = (root / "app/templates/enterprise/sincronizacion.html").read_text(encoding="utf-8")
+    controls = (root / "app/static/enterprise/features/sync-controls.js").read_text(encoding="utf-8")
+    jobs = (root / "app/static/enterprise/features/jobs.js").read_text(encoding="utf-8")
+    assert 'data-sync-timestamp=' in template
+    assert "Intl.DateTimeFormat('es-AR'" in controls
+    assert 'data-job-detail="{{ job.id }}"' in template
+    assert 'id="jobDetailDialog"' in template
+    assert 'initializeJobInteractions();' in jobs
+    assert '/admin/panel/trabajos?focus={{ job.id }}' not in template

@@ -25,7 +25,7 @@
       <span class="sync-metric-icon" aria-hidden="true">◷</span>
       <div>
         <span>Última actualización de stock</span>
-        <strong class="sync-date">{{ stock_sync.ultima_sync_stock or 'Sin datos' }}</strong>
+        <strong class="sync-date" data-sync-timestamp="{{ stock_sync.ultima_sync_stock or '' }}">{{ stock_sync.ultima_sync_stock or 'Sin datos' }}</strong>
         <small>Última marca registrada</small>
       </div>
     </article>
