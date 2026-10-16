@@ -144,7 +144,8 @@ async function refreshJobs({ silent = true, scheduleNext = true } = {}) {
 }
 function prepareFormRequest(form, submitter = null) {
   const method = String(form.method || "POST").toUpperCase();
-  const url = new URL(submitter?.formAction || form.action, window.location.origin);
+  const submitterAction = submitter?.hasAttribute("formaction") ? submitter.getAttribute("formaction") : null;
+  const url = new URL(submitterAction || form.getAttribute("action") || window.location.href, window.location.origin);
   const data = new FormData(form);
   if (method === "GET") {
     for (const [key, value] of data.entries()) url.searchParams.set(key, String(value));
