@@ -581,6 +581,66 @@ class RepositorioProductos:
             for row in rows
         ]
 
+    def listar_mapeos_activos_para_stock_por_item_ids(
+        self, item_ids: set[str], *, batch_size: int = 100
+    ) -> list[dict[str, object]]:
+        """Resuelve únicamente los artículos GBP afectados y vinculados a Tiendanube.
+
+        `batch_size` limita cada consulta SQL, nunca el total de artículos a
+        procesar. Se rechazan mapeos ambiguos para evitar actualizar la variante
+        incorrecta cuando un identificador GBP tiene más de un vínculo activo.
+        """
+        ids = sorted({str(item_id).strip() for item_id in item_ids if str(item_id).strip()})
+        if not ids:
+            return []
+        if batch_size < 1:
+            raise ValueError("batch_size debe ser mayor que cero")
+
+        resultados: dict[str, dict[str, object]] = {}
+        for inicio in range(0, len(ids), batch_size):
+            bloque = ids[inicio : inicio + batch_size]
+            rows = self.db.execute(
+                select(
+                    ProductoFuenteModel.id,
+                    ProductoFuenteModel.sku,
+                    ProductoFuenteModel.id_sistema_gbp,
+                    ProductoTiendaNubeModel.tn_product_id,
+                    ProductoTiendaNubeModel.tn_variant_id,
+                    StockActualModel.stock_publicable_tn,
+                )
+                .join(
+                    ProductoTiendaNubeModel,
+                    ProductoTiendaNubeModel.sku == ProductoFuenteModel.sku,
+                )
+                .join(
+                    StockActualModel,
+                    (StockActualModel.producto_fuente_id == ProductoFuenteModel.id)
+                    & (StockActualModel.usado_para_tienda_nube.is_(True)),
+                    isouter=True,
+                )
+                .where(ProductoFuenteModel.id_sistema_gbp.in_(bloque))
+                .where(
+                    ProductoTiendaNubeModel.estado_publicacion.notin_(
+                        MAPEO_TN_ESTADOS_INACTIVOS
+                    )
+                )
+            ).all()
+            for row in rows:
+                item_id = str(row[2]).strip()
+                if item_id in resultados:
+                    raise ValueError(
+                        f"Mapeo de stock ambiguo para item_id GBP {item_id}"
+                    )
+                resultados[item_id] = {
+                    "producto_fuente_id": row[0],
+                    "sku": row[1],
+                    "id_sistema_gbp": row[2],
+                    "tn_product_id": row[3],
+                    "tn_variant_id": row[4],
+                    "stock_publicable_tn": row[5],
+                }
+        return list(resultados.values())
+
     def obtener_mapeo_activo_para_stock_por_sku(
         self, sku: str
     ) -> dict[str, object] | None:

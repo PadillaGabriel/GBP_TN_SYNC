@@ -36,10 +36,7 @@ export function initializeImportaciones() {
   const form = $("impIndividualForm");
   if (!form) return;
   const input = $("impSku"), button = $("impPreviewButton"), publish = $("impPublishButton"), body = $("impPreviewBody"), status = $("impPreviewStatus");
-  let validatedSku = "";
   function invalidate() {
-    validatedSku = "";
-    publish.disabled = true;
     status.textContent = "Sin consultar";
     body.innerHTML = '<p class="imp-empty">Consultá el artículo para verificar sus datos antes de publicar.</p>';
   }
@@ -54,15 +51,11 @@ export function initializeImportaciones() {
       if (result?.ok === false) throw new Error(result.detalle || result.error || "No se encontró el artículo.");
       const producto = result.producto || {};
       body.innerHTML = previewHtml(producto, result);
-      validatedSku = sku;
-      publish.disabled = false;
       status.textContent = "Artículo consultado";
       body.querySelector(".imp-product-image")?.addEventListener("error", (event) => {
         event.currentTarget.replaceWith(Object.assign(document.createElement("span"), { className: "imp-product-placeholder", textContent: "Imagen no disponible" }));
       }, { once: true });
     } catch (error) {
-      validatedSku = "";
-      publish.disabled = true;
       status.textContent = "Consulta fallida";
       body.textContent = errorMessage(error);
       toast(errorMessage(error), "error", 7000);
@@ -72,7 +65,7 @@ export function initializeImportaciones() {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const sku = input.value.trim();
-    if (!sku || sku !== validatedSku) { toast("Consultá primero el artículo que querés importar.", "error"); return; }
+    if (!sku) { toast("Ingresá el SKU que querés importar.", "error"); input.focus(); return; }
     if (!window.confirm(`¿Crear o actualizar el artículo ${sku} en Tiendanube? Se aplicarán las reglas del importador.`)) return;
     setButtonBusy(publish, true, "Encolando…");
     try {
