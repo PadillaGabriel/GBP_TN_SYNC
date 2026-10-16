@@ -114,26 +114,6 @@ def test_trabajos_ui_tiene_inspeccion_y_filtros(ui_database, monkeypatch):
         assert expected in response.text
 
 
-def test_sincronizacion_ui_tiene_modal_de_detalle_en_la_misma_pantalla(ui_database, monkeypatch):
-    monkeypatch.setattr("app.principal.verificar_admin", lambda *_: None)
-    api = create_app()
-
-    def sesion_test():
-        with ui_database() as db:
-            yield db
-
-    api.dependency_overrides[obtener_sesion_bd] = sesion_test
-    with TestClient(api) as client:
-        response = client.get("/admin/panel/sincronizacion")
-    assert response.status_code == 200
-    for expected in (
-        'id="jobDetailDialog"',
-        'id="jobDetailContent"',
-        'Últimos trabajos de sincronización',
-    ):
-        assert expected in response.text
-
-
 def test_sin_modulos_ui_muertos_ni_fuentes_remotas():
     base = Path(__file__).resolve().parents[1] / "app/static/enterprise"
     source = (base / "app.js").read_text(encoding="utf-8")
@@ -144,14 +124,14 @@ def test_sin_modulos_ui_muertos_ni_fuentes_remotas():
     assert "prefers-reduced-motion" in style
 
 
-def test_sincronizacion_fecha_legible_y_detalle_local():
+def test_sincronizacion_css_aislado_y_modal_local():
     root = Path(__file__).resolve().parents[1]
     template = (root / "app/templates/enterprise/sincronizacion.html").read_text(encoding="utf-8")
-    controls = (root / "app/static/enterprise/features/sync-controls.js").read_text(encoding="utf-8")
-    jobs = (root / "app/static/enterprise/features/jobs.js").read_text(encoding="utf-8")
-    assert 'data-sync-timestamp=' in template
-    assert "Intl.DateTimeFormat('es-AR'" in controls
+    base = (root / "app/templates/enterprise/base.html").read_text(encoding="utf-8")
+    css = (root / "app/static/enterprise/sincronizacion.css").read_text(encoding="utf-8")
     assert 'data-job-detail="{{ job.id }}"' in template
     assert 'id="jobDetailDialog"' in template
-    assert 'initializeJobInteractions();' in jobs
-    assert '/admin/panel/trabajos?focus={{ job.id }}' not in template
+    assert 'href="/admin/panel/trabajos?focus=' not in template
+    assert '{% if seccion == "sincronizacion" %}' in base
+    assert 'sincronizacion.css?v=4' in base
+    assert '.sync-operation-grid' in css
