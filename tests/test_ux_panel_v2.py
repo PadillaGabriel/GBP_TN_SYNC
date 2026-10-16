@@ -114,6 +114,26 @@ def test_trabajos_ui_tiene_inspeccion_y_filtros(ui_database, monkeypatch):
         assert expected in response.text
 
 
+def test_sincronizacion_ui_tiene_modal_de_detalle_en_la_misma_pantalla(ui_database, monkeypatch):
+    monkeypatch.setattr("app.principal.verificar_admin", lambda *_: None)
+    api = create_app()
+
+    def sesion_test():
+        with ui_database() as db:
+            yield db
+
+    api.dependency_overrides[obtener_sesion_bd] = sesion_test
+    with TestClient(api) as client:
+        response = client.get("/admin/panel/sincronizacion")
+    assert response.status_code == 200
+    for expected in (
+        'id="jobDetailDialog"',
+        'id="jobDetailContent"',
+        'Últimos trabajos de sincronización',
+    ):
+        assert expected in response.text
+
+
 def test_sin_modulos_ui_muertos_ni_fuentes_remotas():
     base = Path(__file__).resolve().parents[1] / "app/static/enterprise"
     source = (base / "app.js").read_text(encoding="utf-8")

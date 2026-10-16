@@ -223,7 +223,28 @@ async function openJobDetail(jobId) {
     if (dialog.open) content.textContent = `No se pudo cargar el detalle: ${errorMessage(error)}`;
   }
 }
+function initializeJobInteractions() {
+  if (window.__jobsInteractionsBound) return;
+  window.__jobsInteractionsBound = true;
+
+  document.addEventListener("click", (event) => {
+    const detail = event.target.closest("[data-job-detail]");
+    if (detail) {
+      event.preventDefault();
+      openJobDetail(detail.dataset.jobDetail);
+      return;
+    }
+    const cancel = event.target.closest(".cancel-job");
+    if (cancel) cancelJob(cancel);
+  });
+
+  const dialog = query("#jobDetailDialog");
+  ["#closeJobDetail", "#closeJobDetailFooter"].forEach((selector) => query(selector)?.addEventListener("click", () => dialog?.close()));
+  dialog?.addEventListener("close", () => { detailJobId = null; });
+}
+
 function initializeJobMonitoring() {
+  initializeJobInteractions();
   if (!query("#liveActiveJobs")) return;
   query("#jobSearch")?.addEventListener("input", filterRecentJobs);
   query("#jobStateFilter")?.addEventListener("change", filterRecentJobs);
@@ -232,15 +253,6 @@ function initializeJobMonitoring() {
     setButtonBusy(refresh, true, "Actualizando…"); clearPollTimer();
     await refreshJobs({ silent: false }); setButtonBusy(refresh, false);
   });
-  document.addEventListener("click", (event) => {
-    const detail = event.target.closest("[data-job-detail]");
-    if (detail) openJobDetail(detail.dataset.jobDetail);
-    const cancel = event.target.closest(".cancel-job");
-    if (cancel) cancelJob(cancel);
-  });
-  const dialog = query("#jobDetailDialog");
-  ["#closeJobDetail", "#closeJobDetailFooter"].forEach((selector) => query(selector)?.addEventListener("click", () => dialog?.close()));
-  dialog?.addEventListener("close", () => { detailJobId = null; });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) { clearPollTimer(); return; }
     refreshJobs();
@@ -250,4 +262,4 @@ function initializeJobMonitoring() {
     if (focus && /^\d+$/.test(focus)) openJobDetail(focus);
   });
 }
-export function initializeJobs() { initializeJobForms(); initializeJobMonitoring(); }
+export function initializeJobs() { initializeJobForms(); initializeJobInteractions(); initializeJobMonitoring(); }

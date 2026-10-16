@@ -1,20 +1,214 @@
 {% extends "enterprise/base.html" %}
 {% block content %}
 <div class="sync-page">
-  <div class="sync-intro"><div><p class="sync-description">Control de inventario y operaciones de sincronización con Tiendanube.</p></div><div class="sync-shortcuts"><a class="btn" href="/admin/panel/trabajos">↗ Ver trabajos y logs</a><a class="btn" href="/admin/panel/configuracion">⚙ Configuración</a></div></div>
+  <div class="sync-intro">
+    <div>
+      <p class="sync-description">Control de inventario y operaciones de sincronización con Tiendanube.</p>
+    </div>
+    <div class="sync-shortcuts">
+      <a class="btn" href="/admin/panel/trabajos">↗ Ver trabajos y logs</a>
+      <a class="btn" href="/admin/panel/configuracion">⚙ Configuración</a>
+    </div>
+  </div>
+
   <div class="sync-metrics" aria-label="Indicadores de sincronización">
-    <article class="sync-metric"><span class="sync-metric-icon green" aria-hidden="true">▣</span><div><span>Stock sincronizado</span><strong>{{ stock_sync.productos_con_stock_sync or 0 }}</strong><small>Mapeos procesados al menos una vez</small></div></article>
-    <article class="sync-metric"><span class="sync-metric-icon" aria-hidden="true">◷</span><div><span>Última actualización de stock</span><strong class="sync-date">{{ stock_sync.ultima_sync_stock or 'Sin datos' }}</strong><small>Última marca registrada</small></div></article>
-    <article class="sync-metric"><span class="sync-metric-icon" aria-hidden="true">☷</span><div><span>Trabajos activos</span><strong>{{ jobs_activos|length }}</strong><small>En cola o en procesamiento</small></div></article>
-    <article class="sync-metric"><span class="sync-metric-icon" aria-hidden="true">↻</span><div><span>Stock pendiente</span><strong>{{ stock_sync.productos_pendientes_stock_sync or 0 }}</strong><small>Mapeos activos sin ciclo registrado</small></div></article>
+    <article class="sync-metric">
+      <span class="sync-metric-icon green" aria-hidden="true">▣</span>
+      <div>
+        <span>Stock sincronizado</span>
+        <strong>{{ stock_sync.productos_con_stock_sync or 0 }}</strong>
+        <small>Mapeos procesados al menos una vez</small>
+      </div>
+    </article>
+
+    <article class="sync-metric">
+      <span class="sync-metric-icon" aria-hidden="true">◷</span>
+      <div>
+        <span>Última actualización de stock</span>
+        <strong class="sync-date">{{ stock_sync.ultima_sync_stock or 'Sin datos' }}</strong>
+        <small>Última marca registrada</small>
+      </div>
+    </article>
+
+    <article class="sync-metric">
+      <span class="sync-metric-icon" aria-hidden="true">☷</span>
+      <div>
+        <span>Trabajos activos</span>
+        <strong>{{ jobs_activos|length }}</strong>
+        <small>En cola o en procesamiento</small>
+      </div>
+    </article>
+
+    <article class="sync-metric">
+      <span class="sync-metric-icon" aria-hidden="true">↻</span>
+      <div>
+        <span>Stock pendiente</span>
+        <strong>{{ stock_sync.productos_pendientes_stock_sync or 0 }}</strong>
+        <small>Mapeos activos sin ciclo registrado</small>
+      </div>
+    </article>
   </div>
+
   <div class="sync-operation-grid">
-    <section class="sync-operation card" aria-labelledby="syncMassiveHeading"><div class="sync-operation-head"><span class="sync-big-icon" aria-hidden="true">▤</span><div><h2 id="syncMassiveHeading">Sincronización masiva</h2><p>Actualiza el stock de productos mapeados en Tiendanube.</p></div></div><form class="form-stack job-form" action="/admin/panel/stock/run-now" method="post" data-job-form><label>Límite de productos<input type="number" name="batch_limit" min="1" max="1000" value="100" required></label><button class="btn primary large" type="submit">↻ Sincronizar stock ahora</button></form></section>
-    <section class="sync-operation card" aria-labelledby="syncIncrementalHeading"><div class="sync-operation-head"><span class="sync-big-icon" aria-hidden="true">ϟ</span><div><h2 id="syncIncrementalHeading">Sincronización incremental</h2><p>Procesa los movimientos recientes detectados por la integración.</p></div><span class="sync-chip">STOCK · ID 15</span></div><div class="sync-info"><strong>Actualización de movimientos</strong><span>Consulta los artículos modificados en los últimos 15 minutos y encola el trabajo para el worker.</span></div><form class="form-stack job-form" action="/admin/panel/stock/run-incremental" method="post" data-job-form><button class="btn primary large" type="submit">↻ Sincronizar movimientos ahora</button></form><small class="sync-footnote">La escritura efectiva depende del modo DRY_RUN del worker.</small></section>
-    <section class="sync-operation card" aria-labelledby="syncIndividualHeading"><div class="sync-operation-head"><span class="sync-big-icon" aria-hidden="true">◇</span><div><h2 id="syncIndividualHeading">Sincronización individual</h2><p>Actualiza un producto específico por su SKU.</p></div></div><form class="form-stack job-form" action="/admin/panel/stock/run-sku" method="post" data-job-form><label>SKU del producto<input name="sku" required maxlength="120" placeholder="Ej. ABC123" autocomplete="off"></label><fieldset class="sync-mode"><legend>Tipo de sincronización</legend><label><input type="radio" name="sync_mode_ui" value="stock" checked> Sólo stock</label><label><input type="radio" name="sync_mode_ui" value="full"> Integral <small>(stock + datos)</small></label></fieldset><button class="btn primary large" type="submit" data-sync-individual-submit>▷ Ejecutar actualización</button></form><small class="sync-footnote">La opción integral puede crear o modificar la ficha comercial. Se solicitará confirmación.</small></section>
+    <section class="sync-operation card" aria-labelledby="syncMassiveHeading">
+      <div class="sync-operation-head">
+        <span class="sync-big-icon" aria-hidden="true">▤</span>
+        <div>
+          <h2 id="syncMassiveHeading">Sincronización masiva</h2>
+          <p>Actualiza el stock de productos mapeados en Tiendanube.</p>
+        </div>
+      </div>
+      <div class="sync-operation-body">
+        <form class="form-stack job-form" action="/admin/panel/stock/run-now" method="post" data-job-form>
+          <label>
+            Límite de productos
+            <input type="number" name="batch_limit" min="1" max="1000" value="100" required>
+          </label>
+          <button class="btn primary large" type="submit">↻ Sincronizar stock ahora</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="sync-operation card" aria-labelledby="syncIncrementalHeading">
+      <div class="sync-operation-head sync-operation-head-split">
+        <div class="sync-operation-title-wrap">
+          <span class="sync-big-icon" aria-hidden="true">ϟ</span>
+          <div>
+            <h2 id="syncIncrementalHeading">Sincronización incremental</h2>
+            <p>Procesa los movimientos recientes detectados por la integración.</p>
+          </div>
+        </div>
+        <span class="sync-chip">STOCK · ID 15</span>
+      </div>
+      <div class="sync-operation-body">
+        <div class="sync-info">
+          <strong>Actualización de movimientos</strong>
+          <span>Consulta los artículos modificados en los últimos 15 minutos y encola el trabajo para el worker.</span>
+        </div>
+        <form class="form-stack job-form" action="/admin/panel/stock/run-incremental" method="post" data-job-form>
+          <button class="btn primary large" type="submit">↻ Sincronizar movimientos ahora</button>
+        </form>
+      </div>
+      <small class="sync-footnote">La escritura efectiva depende del modo DRY_RUN del worker.</small>
+    </section>
+
+    <section class="sync-operation card" aria-labelledby="syncIndividualHeading">
+      <div class="sync-operation-head">
+        <span class="sync-big-icon" aria-hidden="true">◇</span>
+        <div>
+          <h2 id="syncIndividualHeading">Sincronización individual</h2>
+          <p>Actualiza un producto específico por su SKU.</p>
+        </div>
+      </div>
+      <div class="sync-operation-body">
+        <form class="form-stack job-form" action="/admin/panel/stock/run-sku" method="post" data-job-form>
+          <label>
+            SKU del producto
+            <input name="sku" required maxlength="120" placeholder="Ej. ABC123" autocomplete="off">
+          </label>
+
+          <fieldset class="sync-mode">
+            <legend>Tipo de sincronización</legend>
+            <label>
+              <input type="radio" name="sync_mode_ui" value="stock" checked>
+              <span>Sólo stock</span>
+            </label>
+            <label>
+              <input type="radio" name="sync_mode_ui" value="full">
+              <span>Integral <small>(stock + datos)</small></span>
+            </label>
+          </fieldset>
+
+          <button class="btn primary large" type="submit" data-sync-individual-submit>▷ Ejecutar actualización</button>
+        </form>
+      </div>
+      <small class="sync-footnote">La opción integral puede crear o modificar la ficha comercial. Se solicitará confirmación.</small>
+    </section>
   </div>
-  <section class="card sync-reconcile"><div class="sync-reconcile-copy"><span class="sync-big-icon" aria-hidden="true">▤</span><div><h2>Reconciliación Tiendanube</h2><p>Verifica vínculos de productos y variantes entre el integrador y Tiendanube. No compara cantidades de stock.</p></div></div><form class="form-inline job-form" action="/admin/panel/mapeos/reconciliar-tn" method="post" data-job-form><label>Mapeos a verificar<input type="number" name="limit" min="1" max="1000" value="500" required></label><button class="btn" type="submit">⌕ Verificar mapeos</button></form></section>
-  <section class="card sync-history"><div class="card-head"><div><h2>Últimos trabajos de sincronización</h2><p class="card-subtitle">Resultados registrados y estado de los procesos.</p></div><a class="btn" href="/admin/panel/trabajos">Ver todos →</a></div><div class="table-wrap"><table><thead><tr><th scope="col">ID</th><th scope="col">Operación</th><th scope="col">Estado</th><th scope="col">Progreso</th><th scope="col">Resultado</th><th scope="col">Acción</th></tr></thead><tbody>{% for job in jobs_recientes %}<tr><td>#{{ job.id }}</td><td>{{ (job.tipo or 'Trabajo')|replace('_', ' ')|title }}</td><td><span class="badge {% if job.estado == 'FINALIZADO' %}success{% elif job.estado in ['ERROR','FINALIZADO_CON_ERRORES','REQUIERE_REVISION'] %}danger{% else %}warning{% endif %}">{{ job.estado|replace('_', ' ')|title }}</span></td><td><div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ job.progreso_porcentaje or 0 }}"><i style="width:{{ job.progreso_porcentaje or 0 }}%"></i></div><small>{{ job.progreso_porcentaje or 0 }}%</small></td><td>{{ job.procesados or 0 }}{% if job.total %} / {{ job.total }} procesados{% else %} procesados{% endif %}{% if job.errores %} · {{ job.errores }} errores{% endif %}</td><td><a class="btn subtle" href="/admin/panel/trabajos?focus={{ job.id }}">Detalle ↗</a></td></tr>{% else %}<tr><td class="empty" colspan="6">Todavía no se registraron ejecuciones.</td></tr>{% endfor %}</tbody></table></div></section>
+
+  <section class="card sync-reconcile">
+    <div class="sync-reconcile-copy">
+      <span class="sync-big-icon" aria-hidden="true">▤</span>
+      <div>
+        <h2>Reconciliación Tiendanube</h2>
+        <p>Verifica vínculos de productos y variantes entre el integrador y Tiendanube. No compara cantidades de stock.</p>
+      </div>
+    </div>
+    <form class="form-inline job-form" action="/admin/panel/mapeos/reconciliar-tn" method="post" data-job-form>
+      <label>
+        Mapeos a verificar
+        <input type="number" name="limit" min="1" max="1000" value="500" required>
+      </label>
+      <button class="btn" type="submit">⌕ Verificar mapeos</button>
+    </form>
+  </section>
+
+  <section class="card sync-history">
+    <div class="card-head">
+      <div>
+        <h2>Últimos trabajos de sincronización</h2>
+        <p class="card-subtitle">Resultados registrados y estado de los procesos.</p>
+      </div>
+      <a class="btn" href="/admin/panel/trabajos">Ver todos →</a>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">ID</th>
+            <th scope="col">Operación</th>
+            <th scope="col">Estado</th>
+            <th scope="col">Progreso</th>
+            <th scope="col">Resultado</th>
+            <th scope="col">Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for job in jobs_recientes %}
+          <tr>
+            <td data-label="ID">#{{ job.id }}</td>
+            <td data-label="Operación">{{ (job.tipo or 'Trabajo')|replace('_', ' ')|title }}</td>
+            <td data-label="Estado">
+              <span class="badge {% if job.estado == 'FINALIZADO' %}success{% elif job.estado in ['ERROR','FINALIZADO_CON_ERRORES','REQUIERE_REVISION'] %}danger{% else %}warning{% endif %}">
+                {{ job.estado|replace('_', ' ')|title }}
+              </span>
+            </td>
+            <td data-label="Progreso">
+              <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ job.progreso_porcentaje or 0 }}">
+                <i style="width:{{ job.progreso_porcentaje or 0 }}%"></i>
+              </div>
+              <small>{{ job.progreso_porcentaje or 0 }}%</small>
+            </td>
+            <td data-label="Resultado" class="sync-result-cell">
+              {{ job.procesados or 0 }}{% if job.total %} / {{ job.total }} procesados{% else %} procesados{% endif %}{% if job.errores %} · {{ job.errores }} errores{% endif %}
+            </td>
+            <td data-label="Acción" class="sync-actions-cell">
+              <button class="btn subtle" type="button" data-job-detail="{{ job.id }}">Detalle</button>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td class="empty" colspan="6">Todavía no se registraron ejecuciones.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <dialog class="job-dialog" id="jobDetailDialog" aria-labelledby="jobDialogTitle">
+    <div class="dialog-head">
+      <div>
+        <span class="eyebrow">INSPECCIÓN DE EJECUCIÓN</span>
+        <h2 id="jobDialogTitle">Detalle del trabajo</h2>
+      </div>
+      <button class="icon-btn" type="button" id="closeJobDetail" aria-label="Cerrar detalle">×</button>
+    </div>
+    <div class="dialog-content" id="jobDetailContent"><p class="muted">Cargando detalle…</p></div>
+    <div class="dialog-footer"><button class="btn" type="button" id="closeJobDetailFooter">Cerrar</button></div>
+  </dialog>
+
   <p class="sync-disclaimer">Programación: {% if settings.stock_scheduler_enabled %}habilitada{% else %}deshabilitada{% endif %}, cada {{ settings.stock_sync_interval_minutes }} minutos. Esto no confirma que el scheduler esté ejecutándose.</p>
 </div>
 {% endblock %}
