@@ -133,5 +133,5 @@ def test_sincronizacion_css_aislado_y_modal_local():
     assert 'id="jobDetailDialog"' in template
     assert 'href="/admin/panel/trabajos?focus=' not in template
     assert '{% if seccion == "sincronizacion" %}' in base
-    assert 'sincronizacion.css?v=4' in base
+    assert 'sincronizacion.css?v=5' in base
     assert '.sync-operation-grid' in css
