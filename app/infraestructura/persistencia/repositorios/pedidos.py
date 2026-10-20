@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -24,6 +24,93 @@ from app.infraestructura.persistencia.modelos import (
 class RepositorioPedidos:
     def __init__(self, sesion: Session) -> None:
         self._sesion = sesion
+
+    def listar_historial_operativo(
+        self, *, busqueda: str = "", estado: str = "", limit: int = 25, offset: int = 0
+    ) -> dict[str, object]:
+        """Historial paginado; nunca expone los JSON con datos personales."""
+        filtros = [PedidoExternoModel.canal == "TIENDA_NUBE"]
+        if busqueda:
+            termino = f"%{busqueda.strip()[:120]}%"
+            filtros.append(or_(
+                PedidoExternoModel.external_order_id.ilike(termino),
+                PedidoExternoModel.numero_pedido.ilike(termino),
+                PedidoExternoModel.gbp_order_id.ilike(termino),
+            ))
+        if estado:
+            filtros.append(PedidoExternoModel.estado_integracion == estado)
+        cantidad = self._sesion.scalar(select(func.count()).select_from(PedidoExternoModel).where(*filtros)) or 0
+        registros = self._sesion.scalars(
+            select(PedidoExternoModel).where(*filtros)
+            .order_by(PedidoExternoModel.created_at.desc(), PedidoExternoModel.id.desc())
+            .offset(offset).limit(limit)
+        ).all()
+        ultimo_confirmado = self._sesion.scalar(
+            select(PedidoExternoModel)
+            .where(
+                PedidoExternoModel.canal == "TIENDA_NUBE",
+                PedidoExternoModel.estado_integracion == "CONFIRMADO",
+                PedidoExternoModel.gbp_order_id.is_not(None),
+            )
+            .order_by(PedidoExternoModel.updated_at.desc(), PedidoExternoModel.id.desc())
+            .limit(1)
+        )
+        return {
+            "total": cantidad,
+            "limit": limit,
+            "offset": offset,
+            "ultimo_confirmado": self._fila_operativa(ultimo_confirmado) if ultimo_confirmado else None,
+            "items": [self._fila_operativa(m) for m in registros],
+        }
+
+    def detalle_operativo(self, pedido_id: int) -> dict[str, object] | None:
+        modelo = self._sesion.scalar(
+            select(PedidoExternoModel)
+            .options(selectinload(PedidoExternoModel.items), selectinload(PedidoExternoModel.historial))
+            .where(PedidoExternoModel.id == pedido_id)
+        )
+        if modelo is None:
+            return None
+        datos = self._fila_operativa(modelo)
+        datos["request_id"] = modelo.request_id
+        datos["correlation_id"] = modelo.correlation_id
+        datos["confirmation_error"] = modelo.confirmation_error
+        try:
+            cliente = json.loads(modelo.cliente_json or "{}")
+        except (ValueError, TypeError):
+            cliente = {}
+        datos["gbp_customer_id"] = cliente.get("gbp_customer_id")
+        datos["items"] = [{
+            "sku": row.sku,
+            "titulo": row.titulo,
+            "cantidad": row.cantidad,
+            "precio_unitario": str(row.precio_unitario),
+        } for row in modelo.items]
+        datos["historial"] = [{
+            "estado_integracion": row.estado_integracion,
+            "estado_negocio": row.estado_negocio,
+            "etapa": row.etapa,
+            "motivo": row.motivo,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        } for row in sorted(modelo.historial, key=lambda item: (item.created_at or modelo.creado_en_origen, item.id or 0))]
+        return datos
+
+    @staticmethod
+    def _fila_operativa(modelo: PedidoExternoModel) -> dict[str, object]:
+        return {
+            "id": modelo.id,
+            "external_order_id": modelo.external_order_id,
+            "numero_pedido": modelo.numero_pedido,
+            "estado_integracion": modelo.estado_integracion,
+            "estado_negocio": modelo.estado_negocio,
+            "etapa": modelo.etapa,
+            "gbp_order_id": modelo.gbp_order_id,
+            "total": str(modelo.total),
+            "moneda": modelo.moneda,
+            "created_at": modelo.created_at.isoformat() if modelo.created_at else None,
+            "updated_at": modelo.updated_at.isoformat() if modelo.updated_at else None,
+            "confirmado_gbp": bool(modelo.gbp_order_id and modelo.estado_integracion == "CONFIRMADO"),
+        }
 
     def recibir_idempotente(
         self, pedido: PedidoExterno, request_id: str, correlation_id: str

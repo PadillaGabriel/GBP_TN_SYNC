@@ -1,5 +1,32 @@
-{% extends "enterprise/base.html" %}{% block content %}
-<section class="hero"><div><span class="eyebrow">TIENDANUBE → GBP</span><h2>Flujo de pedidos con trazabilidad integral</h2><p>Importación, preparación de cliente, carga temporal y confirmación controlada.</p></div><div class="hero-actions"><a class="btn" href="/docs#/pedidos">Abrir API de pedidos</a></div></section>
-<div class="steps vertical"><div><b>1</b><strong>Recepción</strong><span>La orden se importa desde Tiendanube con request y correlation ID.</span></div><div><b>2</b><strong>Cliente GBP</strong><span>Se resuelve o prepara el cliente y su condición fiscal.</span></div><div><b>3</b><strong>Pedido temporal</strong><span>Se valida detalle, depósito, precio, moneda y stock.</span></div><div><b>4</b><strong>Confirmación</strong><span>Se confirma una sola vez mediante idempotencia y GUID.</span></div></div>
-<section class="card"><div class="card-head"><div><span class="eyebrow">CONSULTA OPERATIVA</span><h3>Importar una orden de Tiendanube</h3></div></div><form class="form-inline" id="orderImportForm"><label>ID de orden<input id="orderId" required placeholder="Ej. 52271"></label><button class="btn primary" type="submit">Importar pedido</button></form><pre class="result-console" id="orderResult">El resultado aparecerá aquí.</pre></section>
+{% extends "enterprise/base.html" %}
+{% block content %}
+<div class="orders-page">
+  <header class="orders-heading">
+    <div><span class="eyebrow">TIENDANUBE → GLOBAL BLUE POINT</span><h2>Operaciones de pedidos</h2><p>Seguimiento desde la recepción hasta la confirmación del pedido en GBP.</p></div>
+    <a href="/admin/panel/trabajos" class="btn">Centro de trabajos ↗</a>
+  </header>
+  <div class="orders-metrics">
+    <article class="card"><span>Pedidos registrados</span><strong id="ordersMetricTotal">—</strong><small>En el integrador</small></article>
+    <article class="card"><span>Último pedido confirmado en GBP</span><strong id="ordersMetricLatest">—</strong><small id="ordersMetricLatestDate">Sin confirmaciones registradas</small></article>
+    <article class="card"><span>Estado operativo</span><strong id="ordersWriteStatus">{% if settings.dry_run %}Simulación{% elif settings.pedidos_escritura_gbp_habilitada and settings.pedidos_gbp_staging_enabled and settings.pedidos_gbp_confirmation_enabled %}Escritura habilitada{% else %}Escritura limitada{% endif %}</strong><small>La recepción local no confirma el pedido GBP</small></article>
+  </div>
+  <section class="card orders-import">
+    <div class="card-head"><div><h3>Importación manual de una orden</h3><p class="card-subtitle">La recepción y el procesamiento completo son operaciones diferentes.</p></div></div>
+    <form id="orderImportForm" class="orders-import-form">
+      <label>ID de orden de Tiendanube<input id="orderId" required maxlength="120" placeholder="Ej. 52271" autocomplete="off"></label>
+      <button class="btn" type="submit" data-order-action="receive">Recibir en integrador</button>
+      <button class="btn primary" type="submit" data-order-action="complete">Procesar hasta GBP</button>
+    </form>
+    <p class="orders-hint">«Procesar hasta GBP» encola un trabajo para el worker; solo se considerará completado cuando exista confirmación GBP persistida. Las protecciones de escritura y la idempotencia siguen vigentes.</p>
+    <pre class="result-console" id="orderResult" hidden aria-live="polite"></pre>
+  </section>
+  <section class="card orders-history">
+    <div class="orders-history-head"><div><h3>Historial de integración</h3><p class="card-subtitle">Buscá por orden TN, número comercial o identificador GBP.</p></div><button id="ordersRefresh" type="button" class="btn">Actualizar</button></div>
+    <form id="ordersFilterForm" class="orders-filters"><label>Buscar<input id="ordersSearch" maxlength="120" placeholder="Orden TN / Pedido GBP"></label><label>Estado<select id="ordersStatus"><option value="">Todos</option><option value="PENDIENTE">Pendiente</option><option value="CONFIRMADO">Confirmado</option><option value="ERROR_TECNICO">Error técnico</option><option value="CONFIRMANDO_GBP">Confirmando GBP</option></select></label><button class="btn" type="submit">Filtrar</button></form>
+    <p class="orders-hint" id="ordersLiveStatus" aria-live="polite">Cargando pedidos…</p>
+    <div class="table-wrap"><table class="orders-table"><thead><tr><th>Orden TN</th><th>Registrado</th><th>Etapa</th><th>Estado</th><th>Pedido GBP</th><th>Detalle</th></tr></thead><tbody id="ordersHistoryRows"><tr><td colspan="6">Cargando…</td></tr></tbody></table></div>
+    <div class="orders-pagination"><span id="ordersPageStatus"></span><div><button id="ordersPrevious" type="button" class="btn">Anterior</button><button id="ordersNext" type="button" class="btn">Siguiente</button></div></div>
+  </section>
+  <dialog class="job-dialog orders-dialog" id="orderDetailDialog" aria-labelledby="orderDetailTitle"><div class="dialog-head"><div><span class="eyebrow">TRAZABILIDAD DE PEDIDO</span><h2 id="orderDetailTitle">Detalle</h2></div><button class="icon-btn" type="button" id="orderDetailClose" aria-label="Cerrar detalle">×</button></div><div class="dialog-content" id="orderDetailContent">Cargando…</div><div class="dialog-footer"><button class="btn" type="button" id="orderDetailCloseFooter">Cerrar</button></div></dialog>
+</div>
 {% endblock %}

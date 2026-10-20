@@ -220,6 +220,59 @@ async def importar_pedido_tienda_nube(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.get("/operaciones/historial")
+def historial_pedidos_operativo(
+    busqueda: str = "", estado: str = "", limit: int = 25, offset: int = 0,
+    db: Session = Depends(obtener_sesion_bd),
+) -> dict[str, object]:
+    if not 1 <= limit <= 100 or offset < 0 or len(busqueda) > 120 or len(estado) > 50:
+        raise HTTPException(status_code=422, detail="Parámetros de historial inválidos")
+    return {"ok": True, **RepositorioPedidos(db).listar_historial_operativo(
+        busqueda=busqueda, estado=estado, limit=limit, offset=offset,
+    )}
+
+
+@router.get("/operaciones/{pedido_id}/detalle")
+def detalle_pedido_operativo(
+    pedido_id: int, db: Session = Depends(obtener_sesion_bd),
+) -> dict[str, object]:
+    detalle = RepositorioPedidos(db).detalle_operativo(pedido_id)
+    if detalle is None:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    return {"ok": True, "pedido": detalle}
+
+
+@router.post("/tienda-nube/{order_id}/procesar-gbp", status_code=202)
+def encolar_pedido_tienda_nube_gbp(
+    order_id: str, db: Session = Depends(obtener_sesion_bd),
+) -> dict[str, object]:
+    """Encola el mismo caso de uso del webhook; no escribe en GBP desde HTTP."""
+    order_id = order_id.strip()
+    if not order_id or len(order_id) > 120:
+        raise HTTPException(status_code=422, detail="ID de orden inválido")
+    cfg = obtener_configuracion()
+    if not (cfg.pedidos_escritura_gbp_habilitada and cfg.pedidos_gbp_staging_enabled and cfg.pedidos_gbp_confirmation_enabled) or cfg.dry_run:
+        raise HTTPException(status_code=409, detail="Procesamiento completo GBP deshabilitado. Revisá escritura, staging, confirmación y DRY_RUN del worker.")
+    # La clave coincide con el flujo de webhook para impedir dos procesos independientes
+    # de la misma orden en la cola del worker.
+    repo = RepositorioTrabajosSincronizacion(db)
+    job = repo.crear(
+        tipo="PEDIDO_TN_WEBHOOK",
+        idempotency_key=f"tn:manual:{order_id}",
+        payload={"order_id": order_id},
+        progreso={"mensaje": "Procesamiento de pedido solicitado manualmente.", "porcentaje": 0},
+    )
+    return {
+        "ok": True, "job_id": job.id, "order_id": order_id,
+        "estado_job": job.estado,
+        "mensaje": (
+            "Trabajo existente; verificar estado y efectos en GBP antes de solicitar otro proceso."
+            if job.estado != "PENDIENTE"
+            else "Trabajo registrado en cola; la confirmación GBP aún no está verificada."
+        ),
+    }
+
+
 @router.get("/{canal}/{external_order_id}")
 def consultar_pedido(
     canal: str, external_order_id: str, db: Session = Depends(obtener_sesion_bd)
