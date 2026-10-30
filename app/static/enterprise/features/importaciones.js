@@ -83,6 +83,58 @@ export function initializeImportaciones() {
   document.querySelectorAll('[data-confirm-import-all="true"]').forEach((bulk) => bulk.addEventListener("submit", (event) => {
     if (!window.confirm("¿Iniciar la reimportación general? Puede crear o actualizar múltiples publicaciones.")) event.preventDefault();
   }, { capture: true }));
+  const excelForm = $("impExcelForm"), excelFile = $("impExcelFile"), excelConfirm = $("impExcelConfirm"), excelStatus = $("impExcelStatus");
+  if (excelForm && excelFile && excelConfirm && excelStatus) {
+    let currentBatch = null;
+    const batchSection = $("impExcelBatch"), batchSummary = $("impExcelBatchSummary"), batchRows = $("impExcelBatchRows"), refresh = $("impExcelRefresh");
+    async function refreshBatch() {
+      if (!currentBatch) return;
+      try {
+        const state = await request(`/admin/panel/importar-excel/lotes/${encodeURIComponent(currentBatch)}`);
+        const c = state.conteos;
+        batchSummary.textContent = `Total ${state.total} · Sincronizados ${c.sincronizados} · Mapeados pendientes ${c.mapeados_pendientes} · Procesando ${c.procesando} · Fallidos ${c.fallidos}`;
+        batchRows.innerHTML = state.filas.map((r) => `<tr><td>${safe(r.sku)}</td><td>${safe(r.import_estado)} (#${safe(r.import_job_id)})</td><td>${r.mapeado ? `Sí (#${safe(r.tn_product_id)}/${safe(r.tn_variant_id)})` : "No verificado"}</td><td>${safe(r.stock_estado || r.estado)} ${r.stock_job_id ? `(#${safe(r.stock_job_id)})` : ""}</td><td>${safe(r.detalle)}</td></tr>`).join("");
+      } catch (error) { batchSummary.textContent = errorMessage(error); }
+    }
+    refresh?.addEventListener("click", refreshBatch);
+    const batchRefreshInterval = window.setInterval(() => {
+      if (currentBatch && !batchSection.hidden) refreshBatch();
+    }, 15000);
+    window.addEventListener("pagehide", () => window.clearInterval(batchRefreshInterval), { once: true });
+    let validated = false;
+    excelFile.addEventListener("change", () => { validated = false; excelConfirm.disabled = true; excelStatus.textContent = "Sin validar."; });
+    async function submitExcel(confirmar) {
+      const data = new FormData(excelForm);
+      data.set("confirmar", String(confirmar));
+      excelStatus.textContent = confirmar ? "Registrando trabajos…" : "Validando archivo…";
+      try {
+        const response = await request("/admin/panel/importar-excel", { method: "POST", body: data });
+        if (confirmar) {
+          currentBatch = response.lote;
+          batchSection.hidden = false;
+          refreshBatch();
+          excelConfirm.disabled = true;
+          validated = false;
+          excelStatus.textContent = `${response.cantidad} artículos encolados. Lote ${response.lote.slice(0, 8)}. Revisá Trabajos para los resultados.`;
+          toast("Importación Excel encolada. Revisá el historial de trabajos.", "success");
+          loadRecentImports();
+        } else {
+          validated = true;
+          excelConfirm.disabled = false;
+          excelStatus.textContent = `${response.cantidad} SKU válidos. ${response.duplicados.length} duplicados omitidos. Muestra: ${response.skus.join(", ")}`;
+        }
+      } catch (error) {
+        validated = false;
+        excelConfirm.disabled = true;
+        excelStatus.textContent = errorMessage(error);
+        toast(errorMessage(error), "error", 7000);
+      }
+    }
+    excelForm.addEventListener("submit", (event) => { event.preventDefault(); submitExcel(false); });
+    excelConfirm.addEventListener("click", () => {
+      if (validated && window.confirm("¿Crear o actualizar en Tiendanube los SKU validados? Los bloqueados seguirán sujetos a las reglas existentes.")) submitExcel(true);
+    });
+  }
   loadRecentImports();
 }
 

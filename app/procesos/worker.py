@@ -35,6 +35,7 @@ COMMANDS = {
     "STOCK_SYNC_LOTE": trabajos_masivos.ejecutar_job_stock_lote,
     "STOCK_SYNC_INCREMENTAL": trabajos_masivos.ejecutar_job_stock_incremental,
     "STOCK_SYNC_SKU": trabajos_masivos.ejecutar_job_stock_sku,
+    "DESCUBRIR_TN": trabajos_masivos.ejecutar_job_descubrir_tienda_nube,
     "NORMALIZAR_CATEGORIAS_TN": trabajos_masivos.ejecutar_job_normalizar_categorias,
     "REAUDITAR_BLOQUEADOS": trabajos_masivos.ejecutar_job_reauditar_decision,
     "REAUDITAR_SIN_DESCRIPCION": trabajos_masivos.ejecutar_job_reauditar_decision,
@@ -61,6 +62,11 @@ async def ejecutar(job_id: int, tipo: str, payload_raw: str | None) -> None:
     payload = json.loads(payload_raw or "{}")
     if not isinstance(payload, dict):
         raise ValueError("payload_json debe ser un objeto JSON")
+    if tipo == "IMPORTAR_SKU_TN":
+        payload.pop("lote_excel", None)  # Metadato de trazabilidad, no argumento operativo.
+    if tipo == "STOCK_SYNC_SKU":
+        payload.pop("lote_excel", None)
+        payload.pop("import_job_id", None)
     await handler(job_id=job_id, **payload)
 
 

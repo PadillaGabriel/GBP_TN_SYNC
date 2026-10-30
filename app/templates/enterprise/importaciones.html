@@ -30,6 +30,17 @@
       </form>
     </section>
   </div>
+  <section class="card imp-panel" aria-labelledby="imp-excel-title">
+    <div class="imp-panel-heading"><span class="imp-panel-symbol" aria-hidden="true">▦</span><div><h3 id="imp-excel-title">Importar SKU desde Excel</h3><p>Seleccioná hasta 500 SKU de GBP. Cada artículo se procesa como trabajo independiente.</p></div></div>
+    <form id="impExcelForm" class="imp-form" enctype="multipart/form-data">
+      <label for="impExcelFile">Archivo Excel (.xlsx)</label>
+      <input id="impExcelFile" name="archivo" type="file" accept=".xlsx" required>
+      <p class="imp-note">Primera hoja: celda A1 = SKU, un código por fila. No se sobrescriben bloqueos de validación.</p>
+      <div class="imp-individual-actions"><button class="btn" type="submit" data-excel-action="preview">Validar Excel</button><button class="btn primary" type="button" id="impExcelConfirm" disabled>Confirmar importación</button></div>
+      <p id="impExcelStatus" class="imp-note" role="status">Sin validar.</p>
+      <div id="impExcelBatch" hidden aria-live="polite"><h4>Verificación del lote</h4><p id="impExcelBatchSummary" class="imp-note"></p><div class="imp-table-wrap"><table class="imp-table"><thead><tr><th>SKU</th><th>Importación</th><th>Mapeo</th><th>Stock</th><th>Detalle</th></tr></thead><tbody id="impExcelBatchRows"></tbody></table></div><button id="impExcelRefresh" class="btn" type="button">Actualizar verificación</button></div>
+    </form>
+  </section>
   <section class="card imp-preview" aria-labelledby="imp-preview-title">
     <div class="imp-section-header"><h3 id="imp-preview-title">Vista previa del artículo</h3><span id="impPreviewStatus" class="imp-preview-status" role="status">Sin consultar</span></div>
     <div id="impPreviewBody" aria-live="polite"><p class="imp-empty">Ingresá un SKU y elegí «Consultar artículo» para ver los datos de GBP.</p></div>

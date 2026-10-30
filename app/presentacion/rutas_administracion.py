@@ -1,5 +1,9 @@
 import logging
-from fastapi import APIRouter, Depends, Form, Query
+from uuid import uuid4
+from sqlalchemy import select
+from app.infraestructura.persistencia.modelos import SyncJobModel
+from app.aplicacion.importacion_productos.lector_excel_skus import leer_skus_xlsx, ExcelSKUError, MAX_BYTES
+from fastapi import APIRouter, Depends, Form, Query, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -535,6 +539,97 @@ def panel_cancelar_job(
     return JSONResponse({"ok": True, "job": repo.serializar(job)})
 
 
+@router.post("/panel/importar-excel")
+async def panel_importar_excel(
+    archivo: UploadFile = File(...),
+    confirmar: bool = Form(default=False),
+    db: Session = Depends(obtener_sesion_bd),
+) -> JSONResponse:
+    """Valida XLSX y, con confirmación explícita, encola SKU usando el worker existente."""
+    if not (archivo.filename or "").lower().endswith(".xlsx"):
+        raise HTTPException(status_code=422, detail="Solo se admiten archivos .xlsx.")
+    contenido = await archivo.read(MAX_BYTES + 1)
+    try:
+        resultado = leer_skus_xlsx(contenido)
+    except ExcelSKUError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not confirmar:
+        return JSONResponse({"ok": True, "preview": True, "cantidad": resultado["cantidad"],
+                             "duplicados": resultado["duplicados"], "skus": resultado["skus"][:30]})
+    lote = uuid4().hex
+    repo = RepositorioTrabajosSincronizacion(db)
+    ids = []
+    for sku in resultado["skus"]:
+        job = repo.crear(
+            tipo="IMPORTAR_SKU_TN", sku=sku,
+            payload={"sku": sku, "forzar": False, "lote_excel": lote},
+            progreso={"mensaje": f"Lote Excel {lote[:8]}: SKU {sku} pendiente", "lote_excel": lote,
+                      "porcentaje": 0},
+        )
+        ids.append(job.id)
+    return JSONResponse({"ok": True, "preview": False, "lote": lote,
+                         "cantidad": len(ids), "jobs": ids,
+                         "duplicados": resultado["duplicados"]})
+
+
+@router.get("/panel/importar-excel/lotes/{lote}")
+def panel_estado_lote_excel(
+    lote: str, db: Session = Depends(obtener_sesion_bd)
+) -> JSONResponse:
+    """Estado auditable por fila, sin confundir importación con stock verificado."""
+    from json import loads
+    from app.infraestructura.persistencia.repositorios.productos import RepositorioProductos
+
+    if len(lote) != 32 or any(c not in "0123456789abcdef" for c in lote):
+        raise HTTPException(status_code=422, detail="Identificador de lote inválido")
+    # El ID de lote es aleatorio y se conserva en el payload inmutable del job.
+    jobs = db.scalars(select(SyncJobModel).where(
+        SyncJobModel.tipo.in_(("IMPORTAR_SKU_TN", "STOCK_SYNC_SKU")),
+        SyncJobModel.payload_json.like(f'%"lote_excel": "{lote}"%'),
+    ).order_by(SyncJobModel.id)).all()
+    imports = [j for j in jobs if j.tipo == "IMPORTAR_SKU_TN"]
+    if not imports:
+        raise HTTPException(status_code=404, detail="Lote no encontrado")
+    stock_by_parent = {}
+    for j in jobs:
+        if j.tipo == "STOCK_SYNC_SKU":
+            payload = loads(j.payload_json or "{}")
+            stock_by_parent[payload.get("import_job_id")] = j
+    rows = []
+    counts = {"sincronizados": 0, "mapeados_pendientes": 0, "fallidos": 0, "procesando": 0}
+    repo = RepositorioProductos(db)
+    for imp in imports:
+        progress = loads(imp.progreso_json or "{}")
+        stock_job = stock_by_parent.get(imp.id)
+        stock_progress = loads(stock_job.progreso_json or "{}") if stock_job else {}
+        mapeo = repo.obtener_mapeo_activo_para_stock_por_sku(imp.sku) if imp.sku else None
+        mapped = bool(mapeo and mapeo.get("tn_product_id") and mapeo.get("tn_variant_id"))
+        if imp.estado in ("ERROR", "CANCELADO", "FINALIZADO_CON_ERRORES", "REQUIERE_REVISION"):
+            status = "fallidos"
+        elif imp.estado != "FINALIZADO":
+            status = "procesando"
+        elif not mapped or progress.get("dry_run") or not progress.get("mapeo_verificado"):
+            status = "fallidos" if not progress.get("dry_run") else "mapeados_pendientes"
+        elif stock_job and stock_job.estado == "FINALIZADO" and stock_progress.get("estado") in ("ACTUALIZADO", "ACTUALIZADO_MAPEO_REPARADO", "SIN_CAMBIOS"):
+            status = "sincronizados"
+        elif stock_job and stock_job.estado in ("ERROR", "CANCELADO", "FINALIZADO_CON_ERRORES", "REQUIERE_REVISION"):
+            status = "fallidos"
+        else:
+            status = "mapeados_pendientes"
+        counts[status] += 1
+        rows.append({"sku": imp.sku, "import_job_id": imp.id,
+                     "import_estado": imp.estado, "mapeado": mapped,
+                     "tn_product_id": mapeo.get("tn_product_id") if mapped else None,
+                     "tn_variant_id": mapeo.get("tn_variant_id") if mapped else None,
+                     "stock_job_id": stock_job.id if stock_job else None,
+                     "stock_estado": stock_progress.get("estado") if stock_job else None,
+                     "estado": status,
+                     "detalle": stock_progress.get("mensaje") if stock_job else progress.get("mensaje")})
+    return JSONResponse({"ok": True, "lote": lote, "total": len(imports),
+                         "finalizado": counts["procesando"] == 0 and counts["mapeados_pendientes"] == 0,
+                         "conteos": counts, "filas": rows})
+
+
 @router.post("/panel/importar-sku")
 async def panel_importar_sku_directo(
     sku: str = Form(..., min_length=1),
@@ -710,6 +805,21 @@ async def panel_stock_run_sku(
             "status_url": f"/admin/panel/jobs/{job.id}",
         }
     )
+
+
+@router.post("/panel/mapeos/descubrir-tn")
+async def panel_descubrir_productos_tienda_nube(
+    max_pages: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(obtener_sesion_bd),
+) -> JSONResponse:
+    """Encola descubrimiento del catálogo TN, sin escrituras comerciales."""
+    job = RepositorioTrabajosSincronizacion(db).crear(
+        tipo="DESCUBRIR_TN",
+        progreso={"mensaje": "Descubrimiento Tiendanube en cola", "porcentaje": 0},
+        payload={"max_pages": max_pages},
+    )
+    return JSONResponse({"ok": True, "job_id": job.id, "tipo": job.tipo,
+                         "status_url": f"/admin/panel/jobs/{job.id}"})
 
 
 @router.post("/panel/mapeos/reconciliar-tn")

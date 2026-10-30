@@ -1,6 +1,7 @@
 """Funciones de importacion de jobs; lógica comercial preservada."""
 from __future__ import annotations
 import logging
+import json
 from app.aplicacion.trabajos.comun import _cancel_requested, _mark_cancelled, _percent, _update_job
 from app.aplicacion.servicios.servicio_importacion_tienda_nube import TiendaNubeImportService
 from app.dominio.errores import TiendaNubeHTTPError
@@ -283,6 +284,23 @@ async def ejecutar_job_importar_sku(
             result = await service.importar_producto_manual_tienda_nube(
                 sku=sku, confirm=True, forzar=forzar
             )
+        # El lote Excel verifica mapeo real antes de solicitar stock. Nunca
+        # interpreta un HTTP exitoso o un DRY_RUN como sincronización completa.
+        with SessionLocal() as db:
+            parent = RepositorioTrabajosSincronizacion(db).obtener(job_id)
+            meta = json.loads(parent.payload_json or "{}") if parent else {}
+            lote_excel = meta.get("lote_excel")
+            mapeo = (RepositorioProductos(db).obtener_mapeo_activo_para_stock_por_sku(sku)
+                     if lote_excel and result.get("ok") and not settings.dry_run else None)
+            stock_job_id = None
+            if mapeo and mapeo.get("tn_product_id") and mapeo.get("tn_variant_id"):
+                stock_job = RepositorioTrabajosSincronizacion(db).crear(
+                    tipo="STOCK_SYNC_SKU", sku=sku,
+                    payload={"sku": sku, "lote_excel": lote_excel, "import_job_id": job_id},
+                    idempotency_key=f"excel-stock:{job_id}",
+                    progreso={"mensaje": "Sincronización de stock pendiente después de importar Excel.",
+                              "lote_excel": lote_excel, "porcentaje": 0})
+                stock_job_id = stock_job.id
         estado = "FINALIZADO" if result.get("ok") else "FINALIZADO_CON_ERRORES"
         _update_job(
             job_id,
@@ -302,6 +320,9 @@ async def ejecutar_job_importar_sku(
                 "descripcion_largo": result.get("descripcion_largo"),
                 "ejecuta_tienda_nube": result.get("ejecuta_tienda_nube"),
                 "dry_run": result.get("dry_run"),
+                "lote_excel": lote_excel,
+                "mapeo_verificado": bool(mapeo and mapeo.get("tn_product_id") and mapeo.get("tn_variant_id")),
+                "stock_job_id": stock_job_id,
             },
         )
     except TiendaNubeHTTPError as exc:
