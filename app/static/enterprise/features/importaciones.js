@@ -130,7 +130,18 @@ export function initializeImportaciones() {
         toast(errorMessage(error), "error", 7000);
       }
     }
-    excelForm.addEventListener("submit", (event) => { event.preventDefault(); submitExcel(false); });
+    // Validar no debe enviar el formulario por navegación nativa.
+    // El botón explícito evita un GET accidental si el JS falla o está desactualizado.
+    const excelValidate = $("impExcelValidate");
+    excelValidate?.addEventListener("click", () => {
+      if (!excelFile.files?.length) { excelFile.reportValidity(); return; }
+      submitExcel(false);
+    });
+    excelForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!excelFile.files?.length) { excelFile.reportValidity(); return; }
+      submitExcel(false);
+    });
     excelConfirm.addEventListener("click", () => {
       if (validated && window.confirm("¿Crear o actualizar en Tiendanube los SKU validados? Los bloqueados seguirán sujetos a las reglas existentes.")) submitExcel(true);
     });

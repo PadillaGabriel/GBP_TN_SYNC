@@ -1,7 +1,7 @@
 import { initializeSyncControls } from "./features/sync-controls.js?v=4";
 import { initializeCategories } from "./features/categorias.js";
 import { initializeExports } from "./features/exportaciones.js";
-import { initializeImportaciones } from "./features/importaciones.js";
+import { initializeImportaciones } from "./features/importaciones.js?v=excel2";
 import { initializeJobs } from "./features/jobs.js?v=4";
 import { initializeNavigation, initializeTheme } from "./features/navigation.js";
 import { initializeOrders } from "./features/pedidos.js";
