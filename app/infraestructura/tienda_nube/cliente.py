@@ -305,13 +305,42 @@ class ClienteTiendaNube:
                     params={"page": page, "per_page": per_page},
                 )
                 if response.status_code == 404 and page > 1:
-                    raise RuntimeError("Listado de categorías incompleto: página posterior devolvió 404")
+                    raise RuntimeError(
+                        f"Listado de categorías incompleto: página {page} devolvió 404 "
+                        "sin confirmación previa del final del catálogo"
+                    )
                 self._raise_for_status(response)
                 data = response.json()
-                if not isinstance(data, list) or not data:
-                    break
+                if not isinstance(data, list):
+                    raise RuntimeError(f"Respuesta inesperada al listar categorías: página {page} no es una lista")
                 categories.extend(data)
-                if len(data) < per_page:
+
+                # La API declara el fin del catálogo por Link y/o x-total-count.
+                # No pedir una página inexistente si la última contenía justo per_page ítems.
+                total_header = response.headers.get("x-total-count")
+                total = None
+                if total_header is not None:
+                    try:
+                        total = int(total_header)
+                    except ValueError as exc:
+                        raise RuntimeError("Conteo total de categorías inválido en Tiendanube") from exc
+                    if total < len(categories):
+                        raise RuntimeError("Listado de categorías inconsistente: más filas que x-total-count")
+                next_link = response.links.get("next") if response.headers.get("link") else None
+                has_next = next_link is not None
+                if total is not None:
+                    if len(categories) == total:
+                        if has_next:
+                            raise RuntimeError("Listado de categorías inconsistente: Link anuncia otra página")
+                        break
+                    if not data or len(data) < per_page or (response.headers.get("link") and not has_next):
+                        raise RuntimeError("Listado de categorías incompleto: faltan filas según x-total-count")
+                elif response.headers.get("link"):
+                    if not has_next:
+                        break
+                    if not data:
+                        raise RuntimeError("Listado de categorías inconsistente: Link anuncia otra página vacía")
+                elif not data or len(data) < per_page:
                     break
             else:
                 # Sin un árbol exhaustivo no es seguro decidir que una categoría no existe.
