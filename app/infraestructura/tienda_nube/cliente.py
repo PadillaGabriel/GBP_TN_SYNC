@@ -150,6 +150,22 @@ class ClienteTiendaNube:
                 raise ValueError("Tienda Nube devolvió una orden con formato inválido")
             return data
 
+    async def get_products_page(self, *, page: int, per_page: int = 100) -> list[dict[str, Any]]:
+        """Lista una página del catálogo para reconciliación de variantes."""
+        if page < 1 or not 1 <= per_page <= 200:
+            raise ValueError("Paginación TN inválida")
+        url = f"{self.base_url}/{self.store_id}/products"
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await self._request_with_retries(
+                client, "GET", url, headers=self.headers,
+                params={"page": page, "per_page": per_page},
+            )
+            self._raise_for_status(response)
+            data = response.json()
+            if not isinstance(data, list):
+                raise ValueError("Respuesta de catálogo Tiendanube inválida")
+            return data
+
     async def get_product_by_sku(self, sku: str) -> dict[str, Any] | None:
         """Busca producto por SKU."""
 

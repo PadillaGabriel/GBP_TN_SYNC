@@ -7,3 +7,5 @@ from app.aplicacion.trabajos.importacion import ejecutar_job_importar_todo, ejec
 from app.aplicacion.trabajos.stock import ejecutar_job_stock_lote, ejecutar_job_stock_sku, ejecutar_job_stock_incremental
 from app.aplicacion.trabajos.categorias import ejecutar_job_normalizar_categorias
 from app.aplicacion.trabajos.reconciliacion import ejecutar_job_reconciliar_tienda_nube
+
+from app.aplicacion.trabajos.descubrimiento import ejecutar_job_descubrir_tienda_nube

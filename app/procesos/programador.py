@@ -31,10 +31,26 @@ class IntegradorScheduler:
                 max_instances=1,
                 coalesce=True,
             )
+            self.scheduler.add_job(
+                self._descubrimiento_tick,
+                "cron", hour=3, minute=0,
+                id="descubrir_tienda_nube_diario",
+                replace_existing=True, max_instances=1, coalesce=True,
+            )
         if self.settings.import_scheduler_enabled:
             logger.warning("product_audit_scheduler_disabled_business_policy")
         if self.scheduler.get_jobs():
             self.scheduler.start()
+
+    async def _descubrimiento_tick(self) -> None:
+        """Descubre variantes externas diariamente, si el scheduler de stock está activo."""
+        dia = datetime.now(UTC).date().isoformat()
+        with SessionLocal() as db:
+            RepositorioTrabajosSincronizacion(db).crear(
+                tipo="DESCUBRIR_TN", idempotency_key=f"descubrir-tn:{dia}",
+                payload={"max_pages": 100},
+                progreso={"mensaje": "Descubrimiento diario en cola", "porcentaje": 0},
+            )
 
     async def _stock_tick(self) -> None:
         # Identidad por ventana lógica: evita duplicar jobs si hay 2 schedulers.

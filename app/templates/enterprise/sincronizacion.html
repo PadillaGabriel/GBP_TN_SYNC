@@ -144,6 +144,19 @@
     </form>
   </section>
 
+  <section class="card sync-discovery">
+    <div class="card-head">
+      <div>
+        <h2>Descubrir productos creados en Tiendanube</h2>
+        <p class="card-subtitle">Busca variantes sin vínculo y las asocia por SKU exacto con el catálogo GBP local. No modifica precios, imágenes ni descripciones.</p>
+      </div>
+    </div>
+    <form class="form-inline job-form" action="/admin/panel/mapeos/descubrir-tn" method="post" data-job-form>
+      <button class="btn" type="submit">Buscar y vincular productos</button>
+    </form>
+    <p class="sync-disclaimer">Los SKU duplicados, conflictos de identidad y productos GBP no registrados localmente quedan sin vincular. El resultado se consulta en Trabajos y Auditoría.</p>
+  </section>
+
   <section class="card sync-history">
     <div class="card-head">
       <div>
