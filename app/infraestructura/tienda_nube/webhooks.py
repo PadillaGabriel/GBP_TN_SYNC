@@ -12,12 +12,14 @@ def verificar_firma_webhook(
     cuerpo: bytes,
     firma_recibida: str | None,
     secreto: str,
+    secretos_adicionales: tuple[str, ...] = (),
 ) -> None:
     """Valida ``x-linkedstore-hmac-sha256`` usando HMAC-SHA256 hexadecimal."""
 
     firma = str(firma_recibida or "").strip()
     secreto_normalizado = str(secreto or "").strip()
-    if not secreto_normalizado:
+    secretos = tuple(secret for secret in (secreto_normalizado, *secretos_adicionales) if str(secret).strip())
+    if not secretos:
         raise FirmaWebhookTiendaNubeInvalidaError(
             "TIENDA_NUBE_WEBHOOK_SECRET no está configurado"
         )
@@ -26,12 +28,14 @@ def verificar_firma_webhook(
             "Falta el encabezado x-linkedstore-hmac-sha256"
         )
 
-    esperada = hmac.new(
-        secreto_normalizado.encode("utf-8"),
-        cuerpo,
-        hashlib.sha256,
-    ).hexdigest()
-    if not hmac.compare_digest(esperada, firma.lower()):
+    coincide = any(
+        hmac.compare_digest(
+            hmac.new(secret.strip().encode("utf-8"), cuerpo, hashlib.sha256).hexdigest(),
+            firma.lower(),
+        )
+        for secret in secretos
+    )
+    if not coincide:
         raise FirmaWebhookTiendaNubeInvalidaError(
             "Firma de webhook Tiendanube inválida"
         )

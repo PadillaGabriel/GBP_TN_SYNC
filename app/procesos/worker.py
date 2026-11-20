@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from app.aplicacion.trabajos import trabajos_masivos
 from app.configuracion import obtener_configuracion
-from app.dependencias import construir_procesador_pedido_tienda_nube
+from app.dependencias import construir_procesador_pedido_tienda_nube, obtener_cliente_tienda_nube
 from app.infraestructura.persistencia.base_datos import SessionLocal, engine
 from app.infraestructura.persistencia.repositorios.trabajos_sincronizacion import (
     RepositorioTrabajosSincronizacion,
@@ -44,6 +44,39 @@ COMMANDS = {
 
 
 async def ejecutar(job_id: int, tipo: str, payload_raw: str | None) -> None:
+    if tipo == "PEDIDO_TN_EVENTO":
+        payload = json.loads(payload_raw or "{}")
+        evento, order_id = str(payload["evento"]), str(payload["order_id"])
+        # Nunca se escribe en GBP desde eventos distintos de order/paid.
+        pedido = await obtener_cliente_tienda_nube().get_order(order_id)
+        if not isinstance(pedido, dict):
+            raise ValueError(f"No se pudo consultar el pedido {order_id} en Tiendanube")
+        from app.infraestructura.persistencia.repositorios.pedidos import RepositorioPedidos
+        from app.aplicacion.pedidos.casos_uso.importar_pedido_tienda_nube import ImportarPedidoTiendaNube
+        with SessionLocal() as db:
+            repo_pedidos = RepositorioPedidos(db)
+            if repo_pedidos.obtener_por_clave("TIENDA_NUBE", order_id) is None:
+                # Persiste el pedido, pero nunca genera cliente ni venta en GBP.
+                await ImportarPedidoTiendaNube(
+                    obtener_cliente_tienda_nube(), repo_pedidos
+                ).ejecutar(order_id)
+            registrado = repo_pedidos.registrar_evento_tienda_nube(
+                order_id, evento, str(pedido.get("payment_status") or ""),
+                str(pedido.get("status") or ""),
+            )
+            requiere_revision = evento in {"order/cancelled", "order/voided"} and registrado.get("gbp_confirmado", False)
+            RepositorioTrabajosSincronizacion(db).actualizar(
+                job_id,
+                estado="REQUIERE_REVISION" if requiere_revision else "FINALIZADO",
+                finalizar=True,
+                progreso={
+                    "mensaje": ("Pedido confirmado en GBP con cancelación posterior: revisar manualmente."
+                                if requiere_revision else f"Evento {evento} auditado; sin escritura GBP."),
+                    "porcentaje": 100, "pedido_en_integrador": registrado.get("encontrado", False),
+                    "estado_pago_actual": str(pedido.get("payment_status") or ""),
+                },
+            )
+        return
     if tipo == "PEDIDO_TN_WEBHOOK":
         payload = json.loads(payload_raw or "{}")
         order_id = str(payload["order_id"])

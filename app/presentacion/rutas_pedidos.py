@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
 from decimal import Decimal
 from uuid import uuid4
 
@@ -107,6 +108,14 @@ class WebhookTiendaNubeEntrada(BaseModel):
     store_id: str | int
     event: str
     id: str | int
+    event_launch_ts: int | None = None
+
+
+EVENTOS_PEDIDO_TIENDA_NUBE = frozenset({
+    "order/created", "order/updated", "order/paid", "order/packed",
+    "order/fulfilled", "order/cancelled", "order/edited", "order/pending",
+    "order/voided", "order/unpacked",
+})
 
 
 
@@ -127,6 +136,8 @@ async def recibir_webhook_tienda_nube(
             cuerpo,
             request.headers.get("x-linkedstore-hmac-sha256"),
             configuracion.tienda_nube_webhook_secret,
+            (configuracion.tienda_nube_webhook_secret_legacy,)
+            if getattr(configuracion, "tienda_nube_webhook_secret_legacy", "") else (),
         )
     except FirmaWebhookTiendaNubeInvalidaError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
@@ -144,7 +155,7 @@ async def recibir_webhook_tienda_nube(
         )
 
     evento = entrada.event.strip().lower()
-    if evento not in configuracion.tienda_nube_webhook_event_list:
+    if evento not in EVENTOS_PEDIDO_TIENDA_NUBE or evento not in configuracion.tienda_nube_webhook_event_list:
         return {
             "ok": True,
             "aceptado": False,
@@ -161,11 +172,23 @@ async def recibir_webhook_tienda_nube(
             "order_id": str(entrada.id),
         }
 
+    # Evento pagado usa la misma clave entre retries, sin crear GBP dos veces.
+    # Otros eventos necesitan preservar transiciones repetidas (p.ej. updated),
+    # identificándolas por event_launch_ts o hash del cuerpo recibido.
+    evento_id = (
+        str(entrada.event_launch_ts) if entrada.event_launch_ts is not None
+        else hashlib.sha256(cuerpo).hexdigest()[:20]
+    )
+    clave = (
+        f"tn:{entrada.store_id}:order/paid:{entrada.id}"
+        if evento == "order/paid"
+        else f"tn:{entrada.store_id}:{evento}:{entrada.id}:{evento_id}"
+    )
     job = RepositorioTrabajosSincronizacion(db).crear(
-        tipo="PEDIDO_TN_WEBHOOK",
-        idempotency_key=f"tn:{entrada.store_id}:{evento}:{entrada.id}",
-        payload={"order_id": str(entrada.id)},
-        progreso={"mensaje": "Pedido aceptado. Esperando worker.", "porcentaje": 0},
+        tipo="PEDIDO_TN_WEBHOOK" if evento == "order/paid" else "PEDIDO_TN_EVENTO",
+        idempotency_key=clave,
+        payload={"order_id": str(entrada.id), "evento": evento},
+        progreso={"mensaje": f"Evento {evento} recibido. Esperando worker.", "porcentaje": 0},
     )
     return {
         "ok": True,
@@ -253,15 +276,23 @@ def encolar_pedido_tienda_nube_gbp(
     cfg = obtener_configuracion()
     if not (cfg.pedidos_escritura_gbp_habilitada and cfg.pedidos_gbp_staging_enabled and cfg.pedidos_gbp_confirmation_enabled) or cfg.dry_run:
         raise HTTPException(status_code=409, detail="Procesamiento completo GBP deshabilitado. Revisá escritura, staging, confirmación y DRY_RUN del worker.")
-    # La clave coincide con el flujo de webhook para impedir dos procesos independientes
-    # de la misma orden en la cola del worker.
+    # Misma clave para ejecución manual y webhook; los trabajos históricos
+    # con clave tn:manual se consultan antes de crear otro.
     repo = RepositorioTrabajosSincronizacion(db)
-    job = repo.crear(
-        tipo="PEDIDO_TN_WEBHOOK",
-        idempotency_key=f"tn:manual:{order_id}",
-        payload={"order_id": order_id},
-        progreso={"mensaje": "Procesamiento de pedido solicitado manualmente.", "porcentaje": 0},
-    )
+    from app.infraestructura.persistencia.modelos import SyncJobModel
+    from sqlalchemy import select
+    legacy = db.scalar(select(SyncJobModel).where(
+        SyncJobModel.idempotency_key == f"tn:manual:{order_id}"
+    ))
+    if legacy is not None:
+        job = legacy
+    else:
+        job = repo.crear(
+            tipo="PEDIDO_TN_WEBHOOK",
+            idempotency_key=f"tn:{cfg.tienda_nube_store_id}:order/paid:{order_id}",
+            payload={"order_id": order_id},
+            progreso={"mensaje": "Procesamiento de pedido solicitado manualmente.", "porcentaje": 0},
+        )
     return {
         "ok": True, "job_id": job.id, "order_id": order_id,
         "estado_job": job.estado,

@@ -19,12 +19,21 @@ class ProcesarPedidoTiendaNube:
         importador: ImportarPedidoTiendaNube,
         creador_cliente: CrearClienteGBP,
         confirmador_pedido: ConfirmarPedidoGBP,
+        proveedor_pedidos,
     ) -> None:
         self._importador = importador
         self._creador_cliente = creador_cliente
         self._confirmador_pedido = confirmador_pedido
+        self._proveedor_pedidos = proveedor_pedidos
 
     async def ejecutar(self, order_id: str) -> dict[str, object]:
+        actual = await self._proveedor_pedidos.get_order(order_id)
+        if not isinstance(actual, dict):
+            raise ValueError(f"Pedido {order_id} no encontrado en Tiendanube")
+        if str(actual.get("payment_status") or "").lower() != "paid":
+            raise ValueError(f"Pedido {order_id} sin pago confirmado; no se permite escribir en GBP")
+        if str(actual.get("status") or "").lower() in {"cancelled", "canceled", "voided"}:
+            raise ValueError(f"Pedido {order_id} cancelado o anulado; requiere revisión")
         recepcion = await self._importador.ejecutar(order_id)
         cliente = await self._creador_cliente.ejecutar(recepcion.pedido_id)
         pedido = await self._confirmador_pedido.ejecutar(recepcion.pedido_id)

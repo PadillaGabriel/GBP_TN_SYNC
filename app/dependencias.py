@@ -133,4 +133,4 @@ def construir_procesador_pedido_tienda_nube(
         repositorio,
         configuracion,
     )
-    return ProcesarPedidoTiendaNube(importador, creador_cliente, confirmador)
+    return ProcesarPedidoTiendaNube(importador, creador_cliente, confirmador, obtener_cliente_tienda_nube())

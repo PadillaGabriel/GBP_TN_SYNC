@@ -112,6 +112,27 @@ class RepositorioPedidos:
             "confirmado_gbp": bool(modelo.gbp_order_id and modelo.estado_integracion == "CONFIRMADO"),
         }
 
+    def registrar_evento_tienda_nube(
+        self, order_id: str, evento: str, payment_status: str, status: str
+    ) -> dict[str, bool]:
+        """Anota transiciones sin alterar estados GBP ni la fotografía financiera.
+
+        Cuando no existe una recepción previa, el job conserva la evidencia
+        y puede recuperarse por reconciliación; jamás se crea una venta aquí.
+        """
+        modelo = self._buscar("TIENDA_NUBE", str(order_id))
+        if modelo is None:
+            return {"encontrado": False, "gbp_confirmado": False}
+        motivo = (f"Webhook {evento}; estado actual Tiendanube: "
+                  f"payment_status={payment_status[:40]}, status={status[:40]}")
+        self._sesion.add(PedidoEstadoHistorialModel(
+            pedido_id=modelo.id, estado_negocio=modelo.estado_negocio,
+            estado_integracion=modelo.estado_integracion,
+            etapa=modelo.etapa, motivo=motivo,
+        ))
+        self._sesion.commit()
+        return {"encontrado": True, "gbp_confirmado": bool(modelo.gbp_order_id)}
+
     def recibir_idempotente(
         self, pedido: PedidoExterno, request_id: str, correlation_id: str
     ) -> ResultadoRecepcionPedido:

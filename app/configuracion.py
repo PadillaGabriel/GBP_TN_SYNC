@@ -53,7 +53,12 @@ class ConfiguracionAplicacion(BaseSettings):
     tienda_nube_timeout_seconds: int = 20
     tienda_nube_user_agent: str = "IntegradorGBP-TN/1.0"
     tienda_nube_webhook_secret: str = ""
-    tienda_nube_webhook_events: str = "order/paid"
+    tienda_nube_webhook_secret_legacy: str = ""  # Solo si la app anterior usa otro client_secret
+    tienda_nube_webhook_events: str = (
+        "order/created,order/updated,order/paid,order/packed,"
+        "order/fulfilled,order/cancelled,order/edited,order/pending,"
+        "order/voided,order/unpacked"
+    )
     tienda_nube_pedidos_automaticos_habilitados: bool = False
 
     image_normalization_enabled: bool = False
